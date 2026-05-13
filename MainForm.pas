@@ -2095,7 +2095,7 @@ begin
     Grid.Canvas.Pen.Color := clWhite;
     Grid.Canvas.MoveTo(Rect.Left, Rect.Bottom);
     Grid.Canvas.LineTo(Rect.Right, Rect.Bottom);
-    Grid.Canvas.Pen.Color := clBlack;
+    Grid.Canvas.Pen.Color := clGray;
     Grid.Canvas.MoveTo(Rect.Right, Rect.Top);
     Grid.Canvas.LineTo(Rect.Right, Rect.Bottom);
     Exit;
@@ -2121,7 +2121,7 @@ begin
     Grid.Canvas.Pen.Color := clWhite;
     Grid.Canvas.MoveTo(Rect.Left, Rect.Bottom);
     Grid.Canvas.LineTo(Rect.Right, Rect.Bottom);
-    Grid.Canvas.Pen.Color := clBlack;
+    Grid.Canvas.Pen.Color := clGray;
     Grid.Canvas.MoveTo(Rect.Right, Rect.Top);
     Grid.Canvas.LineTo(Rect.Right, Rect.Bottom);
     Exit;
