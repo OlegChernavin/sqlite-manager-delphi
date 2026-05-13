@@ -1,0 +1,56 @@
+# Delphi generated files
+*.dcu
+*.ddp
+*.identcache
+*.tvsconfig
+*.~*
+*.$*
+
+# Object files
+*.obj
+*.o
+*.a
+*.lib
+
+# Resource files
+*.res
+*.drc
+*.rsm
+*.rs
+
+# Build output
+*.exe
+*.dll
+*.bpl
+*.dcp
+
+# IDE workspace
+*.dsk
+*.local
+*.ppf
+*.cfg
+
+# Debug files
+*.map
+*.tds
+*.pdb
+
+# Backup files
+*.bak
+*~
+
+# Test files
+Test*.exe
+Test*.dcu
+
+# DCU directory
+dcu/
+
+# Output directory
+bin/
+out/
+dist/
+
+# Windows
+Thumbs.db
+desktop.ini
