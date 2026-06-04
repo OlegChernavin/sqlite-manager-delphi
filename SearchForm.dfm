@@ -13,6 +13,7 @@ object frmSearch: TfrmSearch
   OldCreateOrder = True
   Position = poMainFormCenter
   OnActivate = FormActivate
+  OnClose = FormClose
   OnCreate = FormCreate
   OnDestroy = FormDestroy
   PixelsPerInch = 96

@@ -29,6 +29,7 @@ type
     procedure scrFieldsMouseWheelUp(Sender: TObject; Shift: TShiftState; MousePos: TPoint; var Handled: Boolean);
     procedure scrFieldsMouseWheelDown(Sender: TObject; Shift: TShiftState; MousePos: TPoint; var Handled: Boolean);
     procedure FormActivate(Sender: TObject);
+    procedure FormClose(Sender: TObject; var Action: TCloseAction);
   private
     FDB: TSQLiteHandler;
     FTableName: string;
@@ -48,7 +49,13 @@ type
 
 implementation
 
+uses
+  DialogFormSize;
+
 {$R *.dfm}
+
+const
+  cSearchFormSizeKey = 'Search';
 
 const
   OperatorNames: string = '='#13#10'<>'#13#10'<'#13#10'<='#13#10'>'#13#10'>='#13#10'LIKE'#13#10'IS NULL'#13#10'IS NOT NULL'#13#10'IN'#13#10'custom';
@@ -78,6 +85,7 @@ begin
   // Set groupbox height to fit all controls
   scrFields.Height := (Length(FColumns) * 35) + 10;
   scrFields.VertScrollBar.Visible := True;
+  LoadDialogFormSize(Self, cSearchFormSizeKey);
 end;
 
 destructor TfrmSearch.Destroy;
@@ -93,9 +101,14 @@ begin
   scrFields.VertScrollBar.Position := 0;
 end;
 
+procedure TfrmSearch.FormClose(Sender: TObject; var Action: TCloseAction);
+begin
+  SaveDialogFormSize(Self, cSearchFormSizeKey);
+end;
+
 procedure TfrmSearch.FormCreate(Sender: TObject);
 begin
-  // Controls are already created in CreateSearch
+  ApplyDialogMinConstraints(Self);
 end;
 
 procedure TfrmSearch.FormDestroy(Sender: TObject);

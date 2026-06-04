@@ -21,6 +21,7 @@ type
     pnlColumns: TScrollBox;
     btnAddColumn: TButton;
     procedure FormCreate(Sender: TObject);
+    procedure FormDestroy(Sender: TObject);
     procedure btnAddColumnClick(Sender: TObject);
     procedure btnOKClick(Sender: TObject);
     procedure btnCancelClick(Sender: TObject);
@@ -43,8 +44,12 @@ uses
 procedure TfrmCreateTree.FormCreate(Sender: TObject);
 begin
   FColumnPanels := TList.Create;
-  // Add first column row
-  btnAddColumnClick(Sender);
+  btnAddColumnClick(nil);
+end;
+
+procedure TfrmCreateTree.FormDestroy(Sender: TObject);
+begin
+  FreeAndNil(FColumnPanels);
 end;
 
 procedure TfrmCreateTree.btnAddColumnClick(Sender: TObject);
@@ -55,6 +60,8 @@ var
   chkPK, chkNotNull, chkAutoInc: TCheckBox;
   btnRemove: TButton;
 begin
+  if FColumnPanels = nil then
+    FColumnPanels := TList.Create;
   pnl := TPanel.Create(pnlColumns);
   pnl.Parent := pnlColumns;
   pnl.Align := alTop;
@@ -118,21 +125,18 @@ end;
 procedure TfrmCreateTree.RemoveColumn(Sender: TObject);
 var
   I: Integer;
+  P: TPanel;
 begin
-  for I := 0 to FColumnPanels.Count - 1 do
+  if (FColumnPanels = nil) or not (Sender is TButton) then
+    Exit;
+  for I := FColumnPanels.Count - 1 downto 0 do
   begin
-    if TPanel(FColumnPanels[I]).FindComponent('') = nil then
+    P := TPanel(FColumnPanels[I]);
+    if TButton(Sender).Parent = P then
     begin
-      // Find the button that was clicked
-      if Sender is TButton then
-      begin
-        if TButton(Sender).Parent = TPanel(FColumnPanels[I]) then
-        begin
-          TPanel(FColumnPanels[I]).Free;
-          FColumnPanels.Delete(I);
-          Break;
-        end;
-      end;
+      FColumnPanels.Delete(I);
+      P.Free;
+      Break;
     end;
   end;
 end;

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Документация (README)
+    url: https://github.com/OlegChernavin/sqlite-manager-delphi/blob/main/README.md
+    about: Сборка, зависимости, возможности
+  - name: Сторонние зависимости
+    url: https://github.com/OlegChernavin/sqlite-manager-delphi/blob/main/THIRD_PARTY.md
+    about: SynEdit, sqlite3.dll

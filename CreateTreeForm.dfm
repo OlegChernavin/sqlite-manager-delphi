@@ -11,6 +11,8 @@ object frmCreateTree: TfrmCreateTree
   Font.Name = 'Segoe UI'
   Font.Style = []
   OldCreateOrder = True
+  OnCreate = FormCreate
+  OnDestroy = FormDestroy
   Position = poScreenCenter
   PixelsPerInch = 96
   TextHeight = 15

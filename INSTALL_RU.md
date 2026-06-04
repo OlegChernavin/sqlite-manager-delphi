@@ -288,8 +288,8 @@ end;
 
 ## Контакты и поддержка
 
-- GitHub: https://github.com/lazierthanthou/sqlite-manager
-- Баг-трекер: https://github.com/lazierthanthou/sqlite-manager/issues
+- GitHub: https://github.com/OlegChernavin/sqlite-manager-delphi
+- Баг-трекер: https://github.com/OlegChernavin/sqlite-manager-delphi/issues
 
 ## Лицензия
 

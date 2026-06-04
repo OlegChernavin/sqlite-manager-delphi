@@ -116,11 +116,10 @@ object frmMain: TfrmMain
             Left = 0
             Top = 0
             Width = 36
-            Height = 33
+            Height = 15
             Align = alLeft
             Caption = 'TABLE'
             Layout = tlCenter
-            ExplicitHeight = 15
           end
           object btnEditRecord: TButton
             Left = 443
@@ -186,8 +185,6 @@ object frmMain: TfrmMain
           OnMouseWheelDown = sgBrowseMouseWheelDown
           OnMouseWheelUp = sgBrowseMouseWheelUp
           OnSelectCell = sgBrowseSelectCell
-          ExplicitLeft = -3
-          ExplicitTop = 39
         end
         object pnlBrowseStatus: TPanel
           Left = 0
@@ -343,11 +340,10 @@ object frmMain: TfrmMain
             Left = 0
             Top = 0
             Width = 69
-            Height = 33
+            Height = 15
             Align = alLeft
             Caption = 'Index Name:'
             Layout = tlCenter
-            ExplicitHeight = 15
           end
           object edtIndexName: TEdit
             Left = 73
@@ -661,11 +657,10 @@ object frmMain: TfrmMain
             Left = 0
             Top = 0
             Width = 70
-            Height = 33
+            Height = 15
             Align = alLeft
             Caption = 'Table Name:'
             Layout = tlCenter
-            ExplicitHeight = 15
           end
           object edtTableName: TEdit
             Left = 81
@@ -832,6 +827,7 @@ object frmMain: TfrmMain
       ImageIndex = 2
       ParentShowHint = False
       ShowHint = True
+      OnClick = btnImportClick
     end
     object btnSep1: TToolButton
       Left = 81
@@ -858,6 +854,7 @@ object frmMain: TfrmMain
       ImageIndex = 5
       ParentShowHint = False
       ShowHint = True
+      OnClick = btnCreateViewClick
     end
     object btnCreateIndex: TToolButton
       Left = 143
@@ -876,6 +873,7 @@ object frmMain: TfrmMain
       ImageIndex = 7
       ParentShowHint = False
       ShowHint = True
+      OnClick = btnCreateTriggerClick
     end
     object btnRefresh: TToolButton
       Left = 197
@@ -943,6 +941,7 @@ object frmMain: TfrmMain
       end
       object mnuAttachDatabase: TMenuItem
         Caption = 'Attach Database'
+        OnClick = mnuAttachDatabaseClick
       end
       object mnuDetachDatabase: TMenuItem
         Caption = 'Detach Database'
@@ -952,9 +951,11 @@ object frmMain: TfrmMain
       end
       object mnuCopyDatabase: TMenuItem
         Caption = 'Copy Database'
+        OnClick = mnuCopyDatabaseClick
       end
       object mnuCompactDatabase: TMenuItem
         Caption = 'Compact Database'
+        OnClick = mnuCompactDatabaseClick
       end
       object DatabaseInformation1: TMenuItem
         Caption = 'Database Information'
@@ -962,14 +963,17 @@ object frmMain: TfrmMain
       end
       object mnuAnalyzeDatabase: TMenuItem
         Caption = 'Analyze Database'
+        OnClick = mnuAnalyzeDatabaseClick
       end
       object mnuCheckIntegrity: TMenuItem
         Caption = 'Check Integrity'
         object mnuCheckComplete: TMenuItem
           Caption = 'Complete Check'
+          OnClick = mnuCheckCompleteClick
         end
         object mnuCheckQuick: TMenuItem
           Caption = 'Quick Check'
+          OnClick = mnuCheckQuickClick
         end
       end
       object N4: TMenuItem
@@ -977,12 +981,15 @@ object frmMain: TfrmMain
       end
       object mnuExportAll: TMenuItem
         Caption = 'Export All Tables'
+        OnClick = mnuExportAllClick
       end
       object mnuExportDatabase: TMenuItem
         Caption = 'Export Database'
+        OnClick = mnuExportDatabaseClick
       end
       object mnuImport: TMenuItem
         Caption = 'Import from File'
+        OnClick = mnuImportClick
       end
       object N5: TMenuItem
         Caption = '-'
@@ -1007,27 +1014,33 @@ object frmMain: TfrmMain
       end
       object mnuDropTable: TMenuItem
         Caption = 'Drop Table'
+        OnClick = mnuDropTableClick
       end
       object mnuEmptyTable: TMenuItem
         Caption = 'Empty Table'
+        OnClick = mnuEmptyTableClick
       end
       object N7: TMenuItem
         Caption = '-'
       end
       object mnuRenameTable: TMenuItem
         Caption = 'Rename Table'
+        OnClick = mnuRenameTableClick
       end
       object mnuCopyTable: TMenuItem
         Caption = 'Copy Table'
+        OnClick = mnuCopyTableClick
       end
       object mnuExportTable: TMenuItem
         Caption = 'Export Table'
+        OnClick = mnuExportTableClick
       end
       object N8: TMenuItem
         Caption = '-'
       end
       object mnuReindexTable: TMenuItem
         Caption = 'Reindex Table'
+        OnClick = mnuReindexTableClick
       end
     end
     object mnuIndex: TMenuItem
@@ -1052,36 +1065,44 @@ object frmMain: TfrmMain
       Caption = 'View'
       object mnuCreateView: TMenuItem
         Caption = 'Create View'
+        OnClick = mnuCreateViewClick
       end
       object mnuDropView: TMenuItem
         Caption = 'Drop View'
+        OnClick = mnuDropViewClick
       end
       object N10: TMenuItem
         Caption = '-'
       end
       object mnuRenameView: TMenuItem
         Caption = 'Rename View'
+        OnClick = mnuRenameViewClick
       end
       object mnuModifyView: TMenuItem
         Caption = 'Modify View'
+        OnClick = mnuModifyViewClick
       end
       object mnuExportView: TMenuItem
         Caption = 'Export View'
+        OnClick = mnuExportViewClick
       end
     end
     object mnuTrigger: TMenuItem
       Caption = 'Trigger'
       object mnuCreateTrigger: TMenuItem
         Caption = 'Create Trigger'
+        OnClick = mnuCreateTriggerClick
       end
       object mnuDropTrigger: TMenuItem
         Caption = 'Drop Trigger'
+        OnClick = mnuDropTriggerClick
       end
       object N11: TMenuItem
         Caption = '-'
       end
       object mnuRenameTrigger: TMenuItem
         Caption = 'Rename Trigger'
+        OnClick = mnuRenameTriggerClick
       end
     end
     object mnuTools: TMenuItem
@@ -1114,15 +1135,14 @@ object frmMain: TfrmMain
       end
       object mnuSQLiteHome: TMenuItem
         Caption = 'SQLite Home'
+        OnClick = mnuSQLiteHomeClick
       end
       object mnuSQLiteSyntax: TMenuItem
         Caption = 'SQLite Syntax'
+        OnClick = mnuSQLiteSyntaxClick
       end
       object N13: TMenuItem
         Caption = '-'
-      end
-      object mnuExtensionHome: TMenuItem
-        Caption = 'Extension Home'
       end
       object mnuAbout: TMenuItem
         Caption = 'About SQLite Manager'

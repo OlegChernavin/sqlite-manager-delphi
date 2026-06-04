@@ -1,1 +1,68 @@
-Nothing needs to be added to the .gitignore file based on the provided changes. The only modified file is MainForm.pas, which is a source code file and should not be ignored. There are no build artifacts, dependencies, or temporary files in the change list that require ignoring.
+# Delphi / RAD Studio
+*.dcu
+*.dcp
+*.drc
+*.res
+*.exe
+*.dll
+*.bpl
+*.bpi
+*.lib
+*.a
+*.o
+*.ocx
+*.local
+*.identcache
+*.projdata
+*.tvsconfig
+*.dsk
+*.~*
+*.ddp
+*.map
+*.tds
+*.rsm
+*.bak
+
+# Build output (project uses .\$(Platform)\$(Config))
+Win32/
+Win64/
+bin/
+dcu/
+lib/
+obj/
+
+# Delphi history / backups
+__history/
+__recovery/
+
+# User / machine settings
+*.ini
+!docs/*.ini
+
+# IDE
+*.dproj.local
+*.groupproj.local
+*.stat
+
+# VS Code / Cursor (local only; skills stay tracked if already committed)
+.vscode/
+.cursor/*
+!.cursor/skills/
+
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+.DS_Store
+
+# Logs and temp
+*.log
+*.tmp
+*.temp
+
+# Secrets (AI keys etc.)
+*.secret
+.env
+.env.*

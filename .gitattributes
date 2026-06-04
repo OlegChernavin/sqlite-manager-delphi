@@ -1,0 +1,11 @@
+* text=auto eol=crlf
+
+*.pas text diff=pascal
+*.dpr text diff=pascal
+*.inc text diff=pascal
+*.dfm text linguist-generated=true
+*.dproj -text
+*.res binary
+*.ico binary
+*.dll binary
+*.exe binary

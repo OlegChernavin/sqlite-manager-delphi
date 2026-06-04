@@ -1,27 +1,45 @@
 # SQLite Manager для Delphi
 
-Standalone приложение для управления SQLite базами данных, написанное на Delphi 13 (Alexandria).
+[![License: MPL 1.1](https://img.shields.io/badge/License-MPL%201.1-blue.svg)](LICENSE)
+
+Standalone приложение для управления SQLite базами данных на **Delphi VCL** (Windows). Порт [расширения SQLite Manager](https://github.com/lazierthanthou/sqlite-manager) для Firefox.
+
+**Репозиторий:** https://github.com/OlegChernavin/sqlite-manager-delphi
+
+## Быстрый старт
+
+```bash
+git clone https://github.com/OlegChernavin/sqlite-manager-delphi.git
+cd sqlite-manager-delphi
+```
+
+1. Установите [SynEdit](THIRD_PARTY.md#synedit-sql-редактор) в Delphi.
+2. Положите `sqlite3.dll` рядом с проектом или в PATH (см. ниже).
+3. Откройте `SQLiteManager.dpr` и соберите проект.
+
+Подробнее: [CONTRIBUTING.md](CONTRIBUTING.md), чеклист публикации: [PUBLISH_CHECKLIST.md](PUBLISH_CHECKLIST.md).
 
 ## Требования
 
-- **Delphi 10.4.2 Alexandria** или новее
-- **Windows 10/11** (32-bit или 64-bit)
-- **SQLite3.dll** (включена в комплект или скачать отдельно)
+- **Delphi 10.4 (Sydney)** или новее (протестировано на 10.4.2)
+- **Windows 10/11** (Win32 / Win64)
+- **SynEdit** — пакет IDE для SQL-редактора ([THIRD_PARTY.md](THIRD_PARTY.md))
+- **sqlite3.dll** — скачать отдельно ([sqlite.org](https://www.sqlite.org/download.html)), в репозиторий не входит
 
 ## Структура проекта
 
 ```
 sqlite-manager-delphi/
-├── SQLiteManager.dpr         # Главный файл проекта
-├── MainForm.pas / .dfm       # Главная форма
-├── DBModule.pas              # Модуль работы с SQLite
-├── SQLite3.pas               # Обёртка над sqlite3.dll
+├── SQLiteManager.dpr / .dproj
+├── MainForm.pas / .dfm       # Главная форма, SQL-редактор
+├── DBModule.pas              # Работа с SQLite
+├── SQLite3.pas               # Обёртка sqlite3.dll
 ├── ImportExport.pas          # Импорт/экспорт
-├── CreateTreeForm.pas / .dfm # Диалог создания таблицы
-├── OptionsForm.pas / .dfm    # Диалог настроек
-├── AboutForm.pas / .dfm      # Диалог "О программе"
-├── SQLDialogForm.pas / .dfm  # Диалог SQL
-└── README.md                 # Этот файл
+├── AIService.pas, AIProviders.pas, AIOptionsForm.*  # AI (опционально)
+├── SearchForm, RowEditForm, CreateTreeForm, …       # Диалоги
+├── PROJECT_CONTEXT.md        # Краткий контекст для разработчиков
+├── THIRD_PARTY.md            # SynEdit, sqlite3.dll
+└── LICENSE                   # MPL 1.1
 ```
 
 ## Установка
@@ -133,13 +151,8 @@ Name: "{autodesktop}\SQLite Manager"; Filename: "{app}\SQLiteManager.exe"
 
 ⏳ Создание представлений  
 ⏳ Создание триггеров  
-⏳ Сортировка по клику на заголовке таблицы
 ⏳ Показ таблиц с другой БД (через ATTACH)   
-⏳ Изменение строки таблицы - не записывать неизмененные поля
-⏳ Отображение БЛОБА в желаемом виде
-⏳ Цвета в форме редактирования записи
 ⏳ История БД неверно работает с пробелом - считает такие пути за раздельные записи
-⏳ При добавлении записи автоинкрементное поле помечать желтым и позволять добавлять с незаполненным полем
 
 
 ## Горячие клавиши
@@ -243,13 +256,14 @@ if not FDB.ExecuteSQL(SQL).Success then
 
 ## Лицензия
 
-MPL-1.1 (Mozilla Public License)
+[MPL 1.1](LICENSE) (Mozilla Public License). См. также [THIRD_PARTY.md](THIRD_PARTY.md).
 
 ## Ссылки
 
-- [SQLite Official Site](https://www.sqlite.org/)
-- [Delphi 13 Documentation](https://docwiki.embarcadero.com/RADStudio/Alexandria/en/Main_Page)
-- [Original Firefox Extension](https://github.com/lazierthanthou/sqlite-manager)
+- [SQLite](https://www.sqlite.org/)
+- [Delphi 10.4 Documentation](https://docwiki.embarcadero.com/RADStudio/Sydney/en/Main_Page)
+- [Оригинальное расширение Firefox](https://github.com/lazierthanthou/sqlite-manager)
+- [SynEdit](https://github.com/SynEdit/SynEdit)
 
 ## Версии
 

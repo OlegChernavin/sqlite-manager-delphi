@@ -128,6 +128,18 @@ type
     var pzCollSeq: PAnsiChar; var pNotNull: Integer; var pPrimaryKey: Integer;
     var pAutoInc: Integer): Integer; cdecl;
 
+  TSQLite3Backup = type Pointer;
+  PSQLite3Backup = ^TSQLite3Backup;
+
+  TSQLite3BackupInit = function(pDestDb: PSQLite3; zDestName: PAnsiChar;
+    pSrcDb: PSQLite3; zSrcName: PAnsiChar): PSQLite3Backup; cdecl;
+  TSQLite3BackupStep = function(p: PSQLite3Backup; nPage: Integer): Integer; cdecl;
+  TSQLite3BackupFinish = function(p: PSQLite3Backup): Integer; cdecl;
+
+  TSQLite3ProgressHandler = function(pArg: Pointer): Integer; cdecl;
+  TSQLite3ProgressHandlerRegister = function(db: PSQLite3;
+    xCallback: TSQLite3ProgressHandler; pArg: Pointer; nOp: Integer): Integer; cdecl;
+
 var
   SQLite3DLL: THandle = 0;
   sqlite3_open: TSQLite3Open = nil;
@@ -178,6 +190,10 @@ var
   sqlite3_open_v2: TSQLite3OpenV2 = nil;
   sqlite3_complete: TSQLite3Complete = nil;
   sqlite3_table_column_metadata: TSQLite3TableColumnMetadata = nil;
+  sqlite3_backup_init: TSQLite3BackupInit = nil;
+  sqlite3_backup_step: TSQLite3BackupStep = nil;
+  sqlite3_backup_finish: TSQLite3BackupFinish = nil;
+  sqlite3_progress_handler: TSQLite3ProgressHandlerRegister = nil;
 
 function LoadSQLite3(const DllPath: string = ''): Boolean;
 procedure UnloadSQLite3;
@@ -261,6 +277,10 @@ begin
     @sqlite3_open_v2 := GetProcAddress(SQLite3DLL, 'sqlite3_open_v2');
     @sqlite3_complete := GetProcAddress(SQLite3DLL, 'sqlite3_complete');
     @sqlite3_table_column_metadata := GetProcAddress(SQLite3DLL, 'sqlite3_table_column_metadata');
+    @sqlite3_backup_init := GetProcAddress(SQLite3DLL, 'sqlite3_backup_init');
+    @sqlite3_backup_step := GetProcAddress(SQLite3DLL, 'sqlite3_backup_step');
+    @sqlite3_backup_finish := GetProcAddress(SQLite3DLL, 'sqlite3_backup_finish');
+    @sqlite3_progress_handler := GetProcAddress(SQLite3DLL, 'sqlite3_progress_handler');
 
     Result := Assigned(@sqlite3_open) and Assigned(@sqlite3_close) and
               Assigned(@sqlite3_exec) and Assigned(@sqlite3_prepare_v2) and

@@ -13,8 +13,11 @@ object frmRowEdit: TfrmRowEdit
   OldCreateOrder = True
   Position = poMainFormCenter
   OnActivate = FormActivate
+  OnClose = FormClose
   OnCreate = FormCreate
   OnDestroy = FormDestroy
+  OnResize = FormResize
+  OnShow = FormShow
   PixelsPerInch = 96
   TextHeight = 15
   object pnlContent: TPanel

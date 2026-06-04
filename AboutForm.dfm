@@ -93,7 +93,7 @@ object frmAbout: TfrmAbout
       Top = 155
       Width = 350
       Height = 30
-      Caption = 'https://github.com/lazierthanthou/sqlite-manager'
+      Caption = 'https://github.com/OlegChernavin/sqlite-manager-delphi'
       Font.Charset = DEFAULT_CHARSET
       Font.Color = clBlue
       Font.Height = -12
