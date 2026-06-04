@@ -1,14 +1,33 @@
-unit MainForm;
+﻿unit MainForm;
 interface
 uses
   Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes,
   Vcl.Graphics, Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.Menus, Vcl.StdCtrls,
   Vcl.Buttons, Vcl.ExtCtrls, Vcl.ComCtrls, Vcl.Grids, Vcl.ValEdit, Vcl.ImgList,
   System.ImageList, Vcl.BaseImageCollection, Vcl.ImageCollection, System.UITypes,
-  DBModule, Vcl.VirtualImageList, System.IniFiles, System.Generics.Collections,
+  DBModule, ImportExport, Vcl.VirtualImageList, System.IniFiles, System.Generics.Collections,
   System.Generics.Defaults, SQLite3, Vcl.ToolWin, Win.Registry, Clipbrd, SynEdit,
   SynEditHighlighter, SynHighlighterSQL, SearchForm, AIService, AIOptionsForm, SQLAdvancedFormatter;
+
 type
+  TFormExportProc = function(AProgress: TExportProgressProc): Boolean of object;
+
+  TExportProgressHelper = class
+  public
+    CancelRequested: Boolean;
+    ExportBaseCaption: string;
+    ProgressForm: TForm;
+    EdRows: TEdit;
+    LblPercent: TLabel;
+    Bar: TProgressBar;
+    BtnCancel: TButton;
+    OnExport: TFormExportProc;
+    procedure UpdateProgress(const AInfo: TExportProgressInfo);
+    procedure CancelClick(Sender: TObject);
+    procedure CloseQuery(Sender: TObject; var CanClose: Boolean);
+    function ExecuteExport: Boolean;
+  end;
+
   TfrmMain = class(TForm)
     MainMenu: TMainMenu;
     mnuDatabase: TMenuItem;
@@ -74,7 +93,6 @@ type
     mnuSQLiteHome: TMenuItem;
     mnuSQLiteSyntax: TMenuItem;
     N13: TMenuItem;
-    mnuExtensionHome: TMenuItem;
     mnuAbout: TMenuItem;
     ToolBar: TToolBar;
     btnNewDb: TToolButton;
@@ -194,12 +212,39 @@ type
     procedure mnuNewDatabaseClick(Sender: TObject);
     procedure mnuOpenDatabaseClick(Sender: TObject);
     procedure mnuCloseDatabaseClick(Sender: TObject);
+    procedure mnuCopyDatabaseClick(Sender: TObject);
+    procedure mnuCompactDatabaseClick(Sender: TObject);
+    procedure mnuAnalyzeDatabaseClick(Sender: TObject);
+    procedure mnuCheckCompleteClick(Sender: TObject);
+    procedure mnuCheckQuickClick(Sender: TObject);
+    procedure mnuExportAllClick(Sender: TObject);
+    procedure mnuExportDatabaseClick(Sender: TObject);
+    procedure mnuImportClick(Sender: TObject);
+    procedure btnImportClick(Sender: TObject);
+    procedure mnuAttachDatabaseClick(Sender: TObject);
+    procedure OnDetachClick(Sender: TObject);
     procedure mnuExitClick(Sender: TObject);
     procedure mnuRefreshClick(Sender: TObject);
     procedure mnuCreateTableClick(Sender: TObject);
+    procedure mnuDropTableClick(Sender: TObject);
+    procedure mnuEmptyTableClick(Sender: TObject);
+    procedure mnuRenameTableClick(Sender: TObject);
+    procedure mnuCopyTableClick(Sender: TObject);
+    procedure mnuExportTableClick(Sender: TObject);
+    procedure mnuReindexTableClick(Sender: TObject);
     procedure mnuCreateIndexClick(Sender: TObject);
     procedure mnuDropIndexClick(Sender: TObject);
     procedure mnuReindexIndexClick(Sender: TObject);
+    procedure mnuCreateViewClick(Sender: TObject);
+    procedure mnuDropViewClick(Sender: TObject);
+    procedure mnuRenameViewClick(Sender: TObject);
+    procedure mnuModifyViewClick(Sender: TObject);
+    procedure mnuExportViewClick(Sender: TObject);
+    procedure mnuCreateTriggerClick(Sender: TObject);
+    procedure mnuDropTriggerClick(Sender: TObject);
+    procedure mnuRenameTriggerClick(Sender: TObject);
+    procedure btnCreateViewClick(Sender: TObject);
+    procedure btnCreateTriggerClick(Sender: TObject);
     procedure mnuOptionsClick(Sender: TObject);
     procedure mnuAboutClick(Sender: TObject);
     procedure tvStructureClick(Sender: TObject);
@@ -236,6 +281,8 @@ type
     procedure btnEmptyTableClick(Sender: TObject);
     procedure btnFormatQueryClick(Sender: TObject);
     procedure sgExecuteMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+    procedure mnuSQLiteHomeClick(Sender: TObject);
+    procedure mnuSQLiteSyntaxClick(Sender: TObject);
   private
     FReg: TRegistry;
     pmGrid: TPopupMenu;
@@ -263,8 +310,18 @@ type
     // Index context
     FCurrentIndex: string;  // Current selected index name
     FCurrentIndexTable: string;  // Table that the index belongs to
+    FCurrentTrigger: string;  // Current selected trigger name
     // Table context
     FCurrentTableName: string;  // Current selected table name
+    FCurrentSchema: string;     // '' or 'main' for primary DB; alias for attached
+    FDetachMenuAliases: TStringList;
+    FImportExport: TImportExport;
+    FPendingExportFolder: string;
+    FPendingExportFile: string;
+    FPendingExportFmt: TDataFileFormat;
+    FPendingExportCount: Integer;
+    FPendingExportTable: string;
+    FPendingExportSchema: string;
     procedure SplitSQLStatements(const ASQL: string; out AStatements: TArray<string>);
     procedure LoadWindowPosition;
     procedure SaveWindowPosition;
@@ -294,6 +351,42 @@ type
     procedure SaveExecuteGridBackup;
     procedure RestoreExecuteGridFromBackup;
     function BrowseOrderBySuffix: string;
+    function BrowseOrderByClause: string;
+    function BrowseRowIdSql(AGridRow: Integer): string;
+    function BrowseTableSqlRef: string;
+    function BrowseObjectCaption: string;
+    function GetNodeSchema(ANode: TTreeNode): string;
+    procedure AddStructureToNode(AParent: TTreeNode; const ADatabaseName, ACaption: string; AIsAttached: Boolean);
+    procedure UpdateDatabaseMenuState;
+    procedure UpdateTableMenuState;
+    procedure UpdateViewMenuState;
+    procedure UpdateTriggerMenuState;
+    function ResolveTableContext(out ATableName, ASchema: string): Boolean;
+    function ResolveViewContext(out AViewName, ASchema: string): Boolean;
+    function ResolveTriggerContext(out ATriggerName, ASchema: string): Boolean;
+    function ExecuteSQLDialog(const ACaption, ATitle, AInitialSQL: string; out ASQL: string): Boolean;
+    procedure SelectViewInTree(const AViewName, ASchema: string);
+    procedure SelectTriggerInTree(const ATriggerName, ASchema: string);
+    procedure PerformExportView;
+    procedure SelectTableInTree(const ATableName, ASchema: string);
+    function GetConfirmDrop: Boolean;
+    procedure PerformExportTable;
+    procedure FillDetachMenu;
+    procedure PerformDetach(const AAlias: string);
+    procedure ShowIntegrityCheckResult(const ATitle: string; AQuick: Boolean);
+    function GetCsvDelimiter: Char;
+    function GetCsvIncludeHeaders: Boolean;
+    function PromptDataFileFormat(const ACaption: string;
+      out AFormat: TDataFileFormat): Boolean;
+    procedure PerformExportAllTables;
+    procedure PerformExportDatabase;
+    procedure PerformImportFromFile;
+    function ExportAllTablesWorker(AProgress: TExportProgressProc): Boolean;
+    function ExportDatabaseWorker(AProgress: TExportProgressProc): Boolean;
+    function ExportTableWorker(AProgress: TExportProgressProc): Boolean;
+    function ExportViewWorker(AProgress: TExportProgressProc): Boolean;
+    function RunExportProgressDialog(AHelper: TExportProgressHelper;
+      const ACaption: string): Boolean;
   public
     FDB: TSQLiteHandler;
     FCurrentTable: string;
@@ -319,11 +412,161 @@ var
 implementation
 {$R *.dfm}
 uses
-  Vcl.FileCtrl, Winapi.ShellAPI, OptionsForm, AboutForm, CreateTreeForm, CreateIndexForm, AddColumnForm, SQLDialogForm, RowEditForm;
+  Vcl.FileCtrl, Winapi.ShellAPI, Winapi.CommCtrl, OptionsForm, AboutForm, CreateTreeForm,
+  CreateIndexForm, AddColumnForm, SQLDialogForm, RowEditForm;
+
+type
+  TCompactProgressHelper = class
+  public
+    CancelRequested: Boolean;
+    Lbl: TLabel;
+    BtnCancel: TButton;
+    procedure CancelClick(Sender: TObject);
+    procedure CloseQuery(Sender: TObject; var CanClose: Boolean);
+  end;
+
+procedure TCompactProgressHelper.CancelClick(Sender: TObject);
+begin
+  CancelRequested := True;
+  if BtnCancel <> nil then
+    BtnCancel.Enabled := False;
+  if Lbl <> nil then
+    Lbl.Caption := 'Cancelling...';
+end;
+
+procedure TCompactProgressHelper.CloseQuery(Sender: TObject; var CanClose: Boolean);
+begin
+  CanClose := False;
+  if not CancelRequested then
+    CancelClick(BtnCancel);
+end;
+
+var
+  GExportProgressHelper: TExportProgressHelper;
+  GCompactProgressHelper: TCompactProgressHelper;
+
+function FormatRowCount(N: Int64): string;
+begin
+  Result := FormatFloat('#,##0', N);
+end;
+
+procedure SetExportProgressBarPosition(ABar: TProgressBar; APercent: Integer);
+begin
+  if (ABar = nil) or not ABar.HandleAllocated then
+    Exit;
+  if APercent < ABar.Min then
+    APercent := ABar.Min;
+  if APercent > ABar.Max then
+    APercent := ABar.Max;
+  ABar.Position := APercent;
+  SendMessage(ABar.Handle, PBM_SETPOS, APercent, 1);
+end;
+
+function ExportProgressCallback(const AInfo: TExportProgressInfo): Boolean;
+begin
+  Application.ProcessMessages;
+  if GExportProgressHelper <> nil then
+  begin
+    GExportProgressHelper.UpdateProgress(AInfo);
+    Result := not GExportProgressHelper.CancelRequested;
+  end
+  else
+    Result := True;
+end;
+
+procedure TExportProgressHelper.UpdateProgress(const AInfo: TExportProgressInfo);
+begin
+  if ProgressForm <> nil then
+  begin
+    if AInfo.TableCount > 0 then
+      ProgressForm.Caption := Format('%s - %s (%d/%d)', [ExportBaseCaption, AInfo.TableName,
+        AInfo.TableIndex, AInfo.TableCount])
+    else
+      ProgressForm.Caption := Format('%s - %s', [ExportBaseCaption, AInfo.TableName]);
+  end;
+  if EdRows <> nil then
+  begin
+    if AInfo.RowTotal > 0 then
+      EdRows.Text := Format('Rows: %s / %s', [FormatRowCount(AInfo.RowDone),
+        FormatRowCount(AInfo.RowTotal)])
+    else
+      EdRows.Text := Format('Rows: %s', [FormatRowCount(AInfo.RowDone)]);
+  end;
+  if LblPercent <> nil then
+    LblPercent.Caption := IntToStr(AInfo.Percent) + '%';
+  SetExportProgressBarPosition(Bar, AInfo.Percent);
+  if ProgressForm <> nil then
+    ProgressForm.Update;
+end;
+
+procedure TExportProgressHelper.CancelClick(Sender: TObject);
+begin
+  CancelRequested := True;
+  if BtnCancel <> nil then
+    BtnCancel.Enabled := False;
+  if ProgressForm <> nil then
+    ProgressForm.Caption := ExportBaseCaption + ' - Cancelling...';
+end;
+
+procedure TExportProgressHelper.CloseQuery(Sender: TObject; var CanClose: Boolean);
+begin
+  CanClose := False;
+  if not CancelRequested then
+    CancelClick(BtnCancel);
+end;
+
+function TExportProgressHelper.ExecuteExport: Boolean;
+begin
+  if Assigned(OnExport) then
+    Result := OnExport(ExportProgressCallback)
+  else
+    Result := False;
+end;
+
+function CompactVacuumProgress: Boolean;
+begin
+  Application.ProcessMessages;
+  if GCompactProgressHelper <> nil then
+    Result := GCompactProgressHelper.CancelRequested
+  else
+    Result := False;
+end;
 
 function QuoteSQLIdent(const Id: string): string;
 begin
   Result := '"' + StringReplace(Id, '"', '""', [rfReplaceAll]) + '"';
+end;
+
+function GetDbFileSizeBytes(const APath: string): Int64;
+var
+  F: TFileStream;
+begin
+  Result := 0;
+  if not FileExists(APath) then
+    Exit;
+  F := TFileStream.Create(APath, fmOpenRead or fmShareDenyNone);
+  try
+    Result := F.Size;
+  finally
+    F.Free;
+  end;
+end;
+
+function FormatSizeMB(ABytes: Int64): string;
+begin
+  Result := FormatFloat('0.00', ABytes / (1024 * 1024)) + ' MB';
+end;
+
+procedure SetProgressBarMarquee(ABar: TProgressBar; AInterval: Cardinal);
+begin
+  SetWindowLong(ABar.Handle, GWL_STYLE, GetWindowLong(ABar.Handle, GWL_STYLE) or PBS_MARQUEE);
+  SendMessage(ABar.Handle, PBM_SETMARQUEE, 1, AInterval);
+end;
+
+procedure StopProgressBarMarquee(ABar: TProgressBar);
+begin
+  if ABar.HandleAllocated then
+    SendMessage(ABar.Handle, PBM_SETMARQUEE, 0, 0);
 end;
 
 function IfThen(B: Boolean; Yes, No: String): String;
@@ -333,13 +576,44 @@ begin
   else
     Result := No;
 end;
+
+function InferCellTypeFromText(const S: string): TSQLiteColumnType;
+var
+  I: Int64;
+  D: Double;
+  FS: TFormatSettings;
+begin
+  if Copy(S, 1, 4) = 'BLOB' then
+    Exit(sctBlob);
+  if TryStrToInt64(S, I) then
+    Exit(sctInteger);
+  FS := TFormatSettings.Invariant;
+  if TryStrToFloat(S, D, FS) then
+    Exit(sctReal);
+  Result := sctText;
+end;
+
+function EffectiveColumnType(const ColTypes: TArray<TSQLiteColumnType>; ACol: Integer;
+  const CellText: string): TSQLiteColumnType;
+begin
+  if (ACol >= 0) and (ACol < Length(ColTypes)) then
+    Result := ColTypes[ACol]
+  else
+    Result := sctText;
+  if (Result = sctNull) and (CellText <> '<NULL>') and (CellText <> '') then
+    Result := InferCellTypeFromText(CellText);
+end;
 procedure TfrmMain.FormCreate(Sender: TObject);
 begin
   FDB := TSQLiteHandler.Create;
+  FImportExport := TImportExport.Create(FDB);
   FCurrentTable := '';
   FCurrentView := '';
+  FCurrentTrigger := '';
+  FCurrentSchema := '';
   FRecentDatabases := TStringList.Create;
   FRecentQueries := TStringList.Create;
+  FDetachMenuAliases := TStringList.Create;
   FReg := TRegistry.Create(KEY_ALL_ACCESS);
   CurrentGrid := nil;
   PopupMenuCol := 0;
@@ -348,7 +622,55 @@ begin
   FOptions := TIniFile.Create(ExtractFilePath(ParamStr(0)) + 'SQLiteManager.ini');
   LoadOptions;
   // Load recent databases
-  FRecentDatabases.CommaText := FOptions.ReadString('Recent', 'Databases', '');
+  FRecentDatabases.StrictDelimiter := True;
+  FRecentDatabases.Delimiter := ',';
+  FRecentDatabases.QuoteChar := '"';
+  FRecentDatabases.DelimitedText := FOptions.ReadString('Recent', 'Databases', '');
+  // Repair legacy corrupted entries (old save logic split on spaces, then re-saved as CSV)
+  // Example: 'C:\Borland\Delphi', '7.0\Projects\X\db.sqlite' -> 'C:\Borland\Delphi 7.0\Projects\X\db.sqlite'
+  var I := 0;
+  while I < FRecentDatabases.Count - 1 do
+  begin
+    if (Length(FRecentDatabases[I]) >= 3) and
+       (FRecentDatabases[I][2] = ':') and (FRecentDatabases[I][3] = '\') and
+       (FRecentDatabases[I] <> '') and
+       (FRecentDatabases[I + 1] <> '') and
+       CharInSet(FRecentDatabases[I + 1][1], ['0'..'9']) and
+       (Pos('\', FRecentDatabases[I + 1]) > 0) then
+    begin
+      FRecentDatabases[I] := FRecentDatabases[I] + ' ' + FRecentDatabases[I + 1];
+      FRecentDatabases.Delete(I + 1);
+      Continue;
+    end;
+    Inc(I);
+  end;
+  // Normalize: drop stray quote tails, trim, remove duplicates
+  for I := FRecentDatabases.Count - 1 downto 0 do
+  begin
+    var S := Trim(FRecentDatabases[I]);
+    // DelimitedText should already unquote, but legacy broken values can keep extra quotes.
+    while (S <> '') and (S[1] = '"') do
+      Delete(S, 1, 1);
+    while (S <> '') and (S[Length(S)] = '"') do
+      Delete(S, Length(S), 1);
+    S := Trim(S);
+    if S = '' then
+      FRecentDatabases.Delete(I)
+    else
+      FRecentDatabases[I] := S;
+  end;
+  I := 0;
+  while I < FRecentDatabases.Count do
+  begin
+    var J := FRecentDatabases.Count - 1;
+    while J > I do
+    begin
+      if SameText(FRecentDatabases[I], FRecentDatabases[J]) then
+        FRecentDatabases.Delete(J);
+      Dec(J);
+    end;
+    Inc(I);
+  end;
   UpdateRecentMenu;
   // Load recent queries
   LoadRecentQueries;
@@ -372,6 +694,7 @@ begin
   FAIConfigured := False;
   InitializeAIService;
   
+  UpdateDatabaseMenuState;
   UpdateStatusBar('Ready');
 end;
 procedure TfrmMain.FormDestroy(Sender: TObject);
@@ -392,6 +715,8 @@ begin
   SaveOptions;
   FRecentDatabases.Free;
   FRecentQueries.Free;
+  FDetachMenuAliases.Free;
+  FImportExport.Free;
   FDB.Free;
   FOptions.Free;
   // FReg freed last as it's used in save functions
@@ -419,7 +744,10 @@ begin
 end;
 procedure TfrmMain.SaveOptions;
 begin
-  FOptions.WriteString('Recent', 'Databases', FRecentDatabases.CommaText);
+  FRecentDatabases.StrictDelimiter := True;
+  FRecentDatabases.Delimiter := ',';
+  FRecentDatabases.QuoteChar := '"';
+  FOptions.WriteString('Recent', 'Databases', FRecentDatabases.DelimitedText);
 end;
 procedure TfrmMain.UpdateStatusBar(const AMsg: string);
 begin
@@ -453,7 +781,6 @@ begin
     AddToRecent(APath);
     SaveLastDatabase(APath); // Save to registry immediately
     RefreshStructure;
-    UpdateDbInfo;
     UpdateStatusBar('DB open');
     // Load last selected table after structure is loaded
     LoadLastSelectedTable;
@@ -475,8 +802,11 @@ begin
     FDB.CloseDatabase;
     FCurrentTable := '';
     FCurrentView := '';
+    FCurrentTrigger := '';
+    FCurrentSchema := '';
     FCurrentDatabaseName := '';
     FRecentQueries.Clear;
+    UpdateDatabaseMenuState;
     tvStructure.Items.Clear;
     lblDbInfo.Caption := 'No database connected';
     sgBrowse.RowCount := 2;
@@ -487,22 +817,23 @@ begin
     UpdateStatusBar('DB closed');
   end;
 end;
-procedure TfrmMain.RefreshStructure;
+procedure TfrmMain.AddStructureToNode(AParent: TTreeNode; const ADatabaseName, ACaption: string; AIsAttached: Boolean);
 var
   Structure: TDatabaseStructure;
   I: Integer;
-  RootNode, TablesNode, ViewsNode, IndexesNode, TriggersNode: TTreeNode;
+  TablesNode, ViewsNode, IndexesNode, TriggersNode: TTreeNode;
 begin
-  tvStructure.Items.Clear;
-  if not FDB.IsOpen then
-    Exit;
-  Structure := FDB.GetDatabaseStructure;
-  // Root node
-  RootNode := tvStructure.Items.Add(nil, ExtractFileName(FDB.DatabasePath));
-  RootNode.ImageIndex := 0;
-  RootNode.SelectedIndex := 0;
-  // Tables
-  TablesNode := tvStructure.Items.AddChild(RootNode, 'Tables (' + IntToStr(Length(Structure.Tables)) + ')');
+  AParent.ImageIndex := 0;
+  AParent.SelectedIndex := 0;
+  if AIsAttached then
+  begin
+    AParent.Data := Pointer(9);
+    AParent.Text := ACaption;
+  end;
+
+  Structure := FDB.GetDatabaseStructure(ADatabaseName);
+
+  TablesNode := tvStructure.Items.AddChild(AParent, 'Tables (' + IntToStr(Length(Structure.Tables)) + ')');
   TablesNode.ImageIndex := 1;
   TablesNode.SelectedIndex := 1;
   for I := 0 to High(Structure.Tables) do
@@ -510,10 +841,10 @@ begin
     var Node := tvStructure.Items.AddChild(TablesNode, Structure.Tables[I]);
     Node.ImageIndex := 2;
     Node.SelectedIndex := 2;
-    Node.Data := Pointer(1); // table type
+    Node.Data := Pointer(1);
   end;
-  // Views
-  ViewsNode := tvStructure.Items.AddChild(RootNode, 'Views (' + IntToStr(Length(Structure.Views)) + ')');
+
+  ViewsNode := tvStructure.Items.AddChild(AParent, 'Views (' + IntToStr(Length(Structure.Views)) + ')');
   ViewsNode.ImageIndex := 3;
   ViewsNode.SelectedIndex := 3;
   for I := 0 to High(Structure.Views) do
@@ -521,10 +852,10 @@ begin
     var Node := tvStructure.Items.AddChild(ViewsNode, Structure.Views[I]);
     Node.ImageIndex := 4;
     Node.SelectedIndex := 4;
-    Node.Data := Pointer(2); // view type
+    Node.Data := Pointer(2);
   end;
-  // Indexes
-  IndexesNode := tvStructure.Items.AddChild(RootNode, 'Indexes (' + IntToStr(Length(Structure.Indexes)) + ')');
+
+  IndexesNode := tvStructure.Items.AddChild(AParent, 'Indexes (' + IntToStr(Length(Structure.Indexes)) + ')');
   IndexesNode.ImageIndex := 5;
   IndexesNode.SelectedIndex := 5;
   for I := 0 to High(Structure.Indexes) do
@@ -532,10 +863,10 @@ begin
     var Node := tvStructure.Items.AddChild(IndexesNode, Structure.Indexes[I]);
     Node.ImageIndex := 6;
     Node.SelectedIndex := 6;
-    Node.Data := Pointer(3); // index type
+    Node.Data := Pointer(3);
   end;
-  // Triggers
-  TriggersNode := tvStructure.Items.AddChild(RootNode, 'Triggers (' + IntToStr(Length(Structure.Triggers)) + ')');
+
+  TriggersNode := tvStructure.Items.AddChild(AParent, 'Triggers (' + IntToStr(Length(Structure.Triggers)) + ')');
   TriggersNode.ImageIndex := 7;
   TriggersNode.SelectedIndex := 7;
   for I := 0 to High(Structure.Triggers) do
@@ -543,15 +874,100 @@ begin
     var Node := tvStructure.Items.AddChild(TriggersNode, Structure.Triggers[I]);
     Node.ImageIndex := 8;
     Node.SelectedIndex := 8;
+    Node.Data := Pointer(4);
   end;
-  RootNode.Expand(True);
+  AParent.Expand(True);
+end;
+
+function AttachedAliasFromNodeText(const AText: string): string;
+var
+  P: Integer;
+begin
+  P := Pos(' [', AText);
+  if P > 0 then
+    Result := Copy(AText, 1, P - 1)
+  else
+    Result := AText;
+end;
+
+function TfrmMain.GetNodeSchema(ANode: TTreeNode): string;
+var
+  N: TTreeNode;
+begin
+  Result := '';
+  if ANode = nil then
+    Exit;
+  N := ANode;
+  while N <> nil do
+  begin
+    if N.Data = Pointer(9) then
+      Exit(AttachedAliasFromNodeText(N.Text));
+    N := N.Parent;
+  end;
+end;
+
+function TfrmMain.BrowseTableSqlRef: string;
+begin
+  if FCurrentTable <> '' then
+    Result := FDB.QualifiedTableRef(FCurrentSchema, FCurrentTable)
+  else if FCurrentView <> '' then
+    Result := FDB.QualifiedTableRef(FCurrentSchema, FCurrentView)
+  else
+    Result := '';
+end;
+
+function TfrmMain.BrowseObjectCaption: string;
+begin
+  if (FCurrentSchema <> '') and not SameText(FCurrentSchema, 'main') then
+  begin
+    if FCurrentTable <> '' then
+      Result := FCurrentSchema + '.' + FCurrentTable
+    else
+      Result := FCurrentSchema + '.' + FCurrentView;
+  end
+  else if FCurrentTable <> '' then
+    Result := FCurrentTable
+  else
+    Result := FCurrentView;
+end;
+
+procedure TfrmMain.RefreshStructure;
+var
+  RootNode: TTreeNode;
+  Attached: TArray<TAttachedDatabase>;
+  I: Integer;
+  Caption: string;
+begin
+  tvStructure.Items.Clear;
+  if not FDB.IsOpen then
+    Exit;
+
+  RootNode := tvStructure.Items.Add(nil, ExtractFileName(FDB.DatabasePath));
+  AddStructureToNode(RootNode, 'main', ExtractFileName(FDB.DatabasePath), False);
+
+  Attached := FDB.GetAttachedDatabases;
+  for I := 0 to High(Attached) do
+  begin
+    if Attached[I].IsMain then
+      Continue;
+    if Attached[I].FilePath <> '' then
+      Caption := Attached[I].Name + ' [' + ExtractFileName(Attached[I].FilePath) + ']'
+    else
+      Caption := Attached[I].Name;
+    RootNode := tvStructure.Items.Add(nil, Caption);
+    AddStructureToNode(RootNode, Attached[I].Name, Caption, True);
+  end;
+
   UpdateDbInfo;
+  UpdateDatabaseMenuState;
 end;
 procedure TfrmMain.UpdateDbInfo;
 var
   Info: TDictionary<string, Variant>;
   Structure: TDatabaseStructure;
+  Attached: TArray<TAttachedDatabase>;
   Text: string;
+  I, AttachCount: Integer;
 begin
   if not FDB.IsOpen then
   begin
@@ -560,14 +976,32 @@ begin
   end;
   Info := FDB.GetDatabaseInfo;
   Structure := FDB.GetDatabaseStructure;
-  
+  Attached := FDB.GetAttachedDatabases;
+
   Text := 'Page Size: ' + VarToStr(Info['page_size']) + ' bytes' + sLineBreak;
   Text := Text + 'Page Count: ' + VarToStr(Info['page_count']) + sLineBreak;
   Text := Text + 'Tables: ' + IntToStr(Length(Structure.Tables)) + sLineBreak;
   Text := Text + 'Views: ' + IntToStr(Length(Structure.Views)) + sLineBreak;
   Text := Text + 'Indexes: ' + IntToStr(Length(Structure.Indexes)) + sLineBreak;
   Text := Text + 'Triggers: ' + IntToStr(Length(Structure.Triggers));
-  
+
+  AttachCount := 0;
+  for I := 0 to High(Attached) do
+    if not Attached[I].IsMain then
+      Inc(AttachCount);
+  if AttachCount > 0 then
+  begin
+    Text := Text + sLineBreak + 'Attached (' + IntToStr(AttachCount) + '):' + sLineBreak;
+    for I := 0 to High(Attached) do
+      if not Attached[I].IsMain then
+      begin
+        Text := Text + '  ' + Attached[I].Name;
+        if Attached[I].FilePath <> '' then
+          Text := Text + ' — ' + Attached[I].FilePath;
+        Text := Text + sLineBreak;
+      end;
+  end;
+
   lblDbInfo.Caption := Text;
   Info.Free;
 end;
@@ -596,19 +1030,19 @@ begin
 
   TableInfo := nil;
   if FCurrentTable <> '' then
-    TableInfo := FDB.GetTableInfo(FCurrentTable)
+    TableInfo := FDB.GetTableInfo(FCurrentTable, FCurrentSchema)
   else if FCurrentView <> '' then
-    TableInfo := FDB.GetTableInfo(FCurrentView);
+    TableInfo := FDB.GetTableInfo(FCurrentView, FCurrentSchema);
 
   if FCurrentTable <> '' then
   begin
     if FIsSearching then
-      SQL := Format('SELECT * FROM "%s" WHERE %s', [FCurrentTable, FSearchWhereClause])
+      SQL := Format('SELECT * FROM %s WHERE %s', [BrowseTableSqlRef, FSearchWhereClause])
     else
-      SQL := Format('SELECT * FROM "%s"', [FCurrentTable]);
+      SQL := Format('SELECT * FROM %s', [BrowseTableSqlRef]);
   end
   else
-    SQL := Format('SELECT * FROM "%s"', [FCurrentView]);
+    SQL := Format('SELECT * FROM %s', [BrowseTableSqlRef]);
 
   OrderSuffix := BrowseOrderBySuffix;
   if (FBrowseSortCol >= 0) and (OrderSuffix = '') then
@@ -624,7 +1058,7 @@ begin
   end
   else if FCurrentTable <> '' then
   begin
-    CountSQL := Format('SELECT COUNT(*) as cnt FROM "%s"', [FCurrentTable]);
+    CountSQL := Format('SELECT COUNT(*) as cnt FROM %s', [BrowseTableSqlRef]);
     CountResult := FDB.ExecuteSQL(CountSQL);
     if CountResult.Success and (CountResult.RowCount > 0) then
       FTotalRows := CountResult.Rows[0][0]
@@ -633,7 +1067,7 @@ begin
   end
   else
   begin
-    CountSQL := Format('SELECT COUNT(*) as cnt FROM "%s"', [FCurrentView]);
+    CountSQL := Format('SELECT COUNT(*) as cnt FROM %s', [BrowseTableSqlRef]);
     CountResult := FDB.ExecuteSQL(CountSQL);
     if CountResult.Success and (CountResult.RowCount > 0) then
       FTotalRows := CountResult.Rows[0][0]
@@ -659,12 +1093,12 @@ begin
   if FCurrentTable <> '' then
   begin
     lblTable.Caption := 'TABLE';
-    edtBrowseTitle.Text := FCurrentTable;
+    edtBrowseTitle.Text := BrowseObjectCaption;
   end
   else
   begin
     lblTable.Caption := 'VIEW';
-    edtBrowseTitle.Text := FCurrentView;
+    edtBrowseTitle.Text := BrowseObjectCaption;
   end;
 end;
 procedure TfrmMain.DatabaseInformation1Click(Sender: TObject);
@@ -769,7 +1203,7 @@ begin
     Exit(-1);
 
   if (ACol >= 0) and (ACol < Length(FExecuteColumnTypes)) then
-    ColType := FExecuteColumnTypes[ACol]
+    ColType := EffectiveColumnType(FExecuteColumnTypes, ACol, S1)
   else
     ColType := sctText;
 
@@ -895,6 +1329,26 @@ begin
     Exit;
   Result := ' ORDER BY ' + QuoteSQLIdent(TableInfo[FBrowseSortCol].Name) + ' ' +
     IfThen(FBrowseSortAsc, 'ASC', 'DESC');
+end;
+
+function TfrmMain.BrowseOrderByClause: string;
+begin
+  Result := BrowseOrderBySuffix;
+  if Result = '' then
+    Result := ' ORDER BY rowid';
+end;
+
+function TfrmMain.BrowseRowIdSql(AGridRow: Integer): string;
+var
+  RowOffset: Integer;
+begin
+  RowOffset := (AGridRow - 1) + StrToIntDef(edtOffset.Text, 0);
+  if FIsSearching then
+    Result := Format('SELECT rowid FROM %s WHERE %s%s LIMIT 1 OFFSET %d',
+      [BrowseTableSqlRef, FSearchWhereClause, BrowseOrderByClause, RowOffset])
+  else
+    Result := Format('SELECT rowid FROM %s%s LIMIT 1 OFFSET %d',
+      [BrowseTableSqlRef, BrowseOrderByClause, RowOffset]);
 end;
 
 procedure TfrmMain.sgBrowseMouseDown(Sender: TObject; Button: TMouseButton;
@@ -1079,6 +1533,1053 @@ procedure TfrmMain.mnuCloseDatabaseClick(Sender: TObject);
 begin
   CloseDatabase;
 end;
+
+procedure TfrmMain.mnuCopyDatabaseClick(Sender: TObject);
+var
+  SaveDialog: TSaveDialog;
+  DestPath: string;
+begin
+  if not FDB.IsOpen then
+  begin
+    ShowMessage('No database connected');
+    Exit;
+  end;
+
+  SaveDialog := TSaveDialog.Create(Self);
+  try
+    SaveDialog.Filter := 'SQLite Database|*.sqlite;*.db;*.sqlite3|All Files|*.*';
+    SaveDialog.DefaultExt := 'sqlite';
+    SaveDialog.FileName := ChangeFileExt(ExtractFileName(FDB.DatabasePath), '') + '_copy.sqlite';
+    if not SaveDialog.Execute then
+      Exit;
+
+    DestPath := SaveDialog.FileName;
+    if SameText(ExpandFileName(DestPath), ExpandFileName(FDB.DatabasePath)) then
+    begin
+      ShowMessage('Destination must be different from the current database file.');
+      Exit;
+    end;
+
+    if FileExists(DestPath) then
+      if MessageDlg('File already exists. Overwrite?',
+        mtConfirmation, [mbYes, mbNo], 0) <> mrYes then
+        Exit;
+
+    if FDB.CopyDatabase(DestPath) then
+    begin
+      UpdateStatusBar('Database copied to: ' + DestPath);
+      MessageDlg('Database copied successfully to:' + sLineBreak + DestPath,
+        mtInformation, [mbOK], 0);
+    end
+    else
+      ShowMessage('Copy failed: ' + FDB.LastError);
+  finally
+    SaveDialog.Free;
+  end;
+end;
+
+procedure TfrmMain.mnuCompactDatabaseClick(Sender: TObject);
+var
+  DbPath: string;
+  SizeBefore, SizeAfter, Saved: Int64;
+  Msg: string;
+  Ok: Boolean;
+  ProgressForm: TForm;
+  Lbl: TLabel;
+  Bar: TProgressBar;
+  BtnCancel: TButton;
+  ProgressHelper: TCompactProgressHelper;
+
+begin
+  if not FDB.IsOpen then
+  begin
+    ShowMessage('No database connected');
+    Exit;
+  end;
+
+  if MessageDlg('Compact database (VACUUM)?' + sLineBreak +
+    'This may take a while on large databases.',
+    mtConfirmation, [mbYes, mbNo], 0) <> mrYes then
+    Exit;
+
+  DbPath := FDB.DatabasePath;
+  SizeBefore := GetDbFileSizeBytes(DbPath);
+  ProgressHelper := TCompactProgressHelper.Create;
+  try
+    ProgressForm := TForm.Create(Self);
+    try
+    ProgressForm.BorderStyle := bsDialog;
+    ProgressForm.BorderIcons := [biSystemMenu];
+    ProgressForm.Caption := 'Compact Database';
+    ProgressForm.Position := poOwnerFormCenter;
+    ProgressForm.Width := 400;
+    ProgressForm.Height := 150;
+    ProgressForm.FormStyle := fsStayOnTop;
+
+    Lbl := TLabel.Create(ProgressForm);
+    Lbl.Parent := ProgressForm;
+    Lbl.Left := 16;
+    Lbl.Top := 16;
+    Lbl.Width := ProgressForm.ClientWidth - 32;
+    Lbl.Caption := 'VACUUM in progress. Please wait...';
+    Lbl.AutoSize := False;
+
+    Bar := TProgressBar.Create(ProgressForm);
+    Bar.Parent := ProgressForm;
+    Bar.Left := 16;
+    Bar.Top := 44;
+    Bar.Width := ProgressForm.ClientWidth - 32;
+    SetProgressBarMarquee(Bar, 40);
+
+    BtnCancel := TButton.Create(ProgressForm);
+    BtnCancel.Parent := ProgressForm;
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Width := 90;
+    BtnCancel.Height := 25;
+    BtnCancel.Left := ProgressForm.ClientWidth - BtnCancel.Width - 16;
+    BtnCancel.Top := 80;
+    ProgressHelper.CancelRequested := False;
+    ProgressHelper.Lbl := Lbl;
+    ProgressHelper.BtnCancel := BtnCancel;
+    BtnCancel.OnClick := ProgressHelper.CancelClick;
+    ProgressForm.OnCloseQuery := ProgressHelper.CloseQuery;
+
+    Enabled := False;
+    try
+      ProgressForm.Show;
+      Application.ProcessMessages;
+
+      GCompactProgressHelper := ProgressHelper;
+      try
+        Ok := FDB.Vacuum(CompactVacuumProgress);
+      finally
+        GCompactProgressHelper := nil;
+      end;
+
+      StopProgressBarMarquee(Bar);
+      ProgressForm.Close;
+    finally
+      Enabled := True;
+    end;
+    finally
+      ProgressForm.Free;
+    end;
+  finally
+    ProgressHelper.Free;
+  end;
+
+  if Ok then
+  begin
+    SizeAfter := GetDbFileSizeBytes(DbPath);
+    Saved := SizeBefore - SizeAfter;
+    UpdateDbInfo;
+    RefreshStructure;
+    UpdateStatusBar('Database compacted');
+    Msg := 'Database compacted successfully.' + sLineBreak + sLineBreak +
+      'Size before: ' + FormatSizeMB(SizeBefore) + sLineBreak +
+      'Size after: ' + FormatSizeMB(SizeAfter) + sLineBreak +
+      'Saved: ' + FormatSizeMB(Saved);
+    MessageDlg(Msg, mtInformation, [mbOK], 0);
+  end
+  else if SameText(FDB.LastError, 'Operation cancelled by user.') then
+    UpdateStatusBar('Compact cancelled')
+  else
+    ShowMessage('Compact failed: ' + FDB.LastError);
+end;
+
+procedure TfrmMain.mnuAnalyzeDatabaseClick(Sender: TObject);
+begin
+  if not FDB.IsOpen then
+  begin
+    ShowMessage('No database connected');
+    Exit;
+  end;
+
+  Screen.Cursor := crHourGlass;
+  try
+    if FDB.Analyze then
+    begin
+      UpdateStatusBar('Database analyzed');
+      ShowMessage('Database analyzed successfully.');
+    end
+    else
+      ShowMessage('Analyze failed: ' + FDB.LastError);
+  finally
+    Screen.Cursor := crDefault;
+  end;
+end;
+
+procedure TfrmMain.ShowIntegrityCheckResult(const ATitle: string; AQuick: Boolean);
+var
+  Lines: TArray<string>;
+  I: Integer;
+  Msg, Line: string;
+  Ok: Boolean;
+begin
+  if not FDB.IsOpen then
+  begin
+    ShowMessage('No database connected');
+    Exit;
+  end;
+
+  Screen.Cursor := crHourGlass;
+  try
+    Lines := FDB.IntegrityCheck(AQuick);
+  finally
+    Screen.Cursor := crDefault;
+  end;
+
+  if Length(Lines) = 0 then
+  begin
+    if FDB.LastError <> '' then
+      ShowMessage(ATitle + ' failed: ' + FDB.LastError)
+    else
+      ShowMessage(ATitle + ' failed.');
+    Exit;
+  end;
+
+  Ok := (Length(Lines) = 1) and SameText(Lines[0], 'ok');
+  if Ok then
+  begin
+    UpdateStatusBar(ATitle + ': OK');
+    MessageDlg(ATitle + sLineBreak + sLineBreak + 'No problems found.',
+      mtInformation, [mbOK], 0);
+    Exit;
+  end;
+
+  Msg := ATitle + ' found issues:' + sLineBreak + sLineBreak;
+  for I := 0 to High(Lines) do
+  begin
+    Line := Lines[I];
+    if Length(Msg) + Length(Line) + 4 > 30000 then
+    begin
+      Msg := Msg + '...';
+      Break;
+    end;
+    Msg := Msg + Line + sLineBreak;
+  end;
+  UpdateStatusBar(ATitle + ': problems found');
+  MessageDlg(Msg, mtWarning, [mbOK], 0);
+end;
+
+procedure TfrmMain.mnuCheckCompleteClick(Sender: TObject);
+begin
+  ShowIntegrityCheckResult('Integrity check', False);
+end;
+
+procedure TfrmMain.mnuCheckQuickClick(Sender: TObject);
+begin
+  ShowIntegrityCheckResult('Quick integrity check', True);
+end;
+
+function SuggestDatabaseAlias(const AFilePath: string): string;
+var
+  S: string;
+  I: Integer;
+begin
+  S := ChangeFileExt(ExtractFileName(AFilePath), '');
+  if S = '' then
+    S := 'attached';
+  if not CharInSet(S[1], ['A'..'Z', 'a'..'z', '_']) then
+    S := '_' + S;
+  for I := 2 to Length(S) do
+    if not CharInSet(S[I], ['A'..'Z', 'a'..'z', '0'..'9', '_']) then
+      S[I] := '_';
+  Result := S;
+end;
+
+function TfrmMain.GetCsvDelimiter: Char;
+begin
+  case FOptions.ReadInteger('Options', 'CSVDelimiter', 0) of
+    1: Result := ';';
+    2: Result := #9;
+  else
+    Result := ',';
+  end;
+end;
+
+function TfrmMain.GetCsvIncludeHeaders: Boolean;
+begin
+  Result := FOptions.ReadBool('Options', 'CSVHeaders', True);
+end;
+
+function TfrmMain.PromptDataFileFormat(const ACaption: string;
+  out AFormat: TDataFileFormat): Boolean;
+var
+  Dlg: TForm;
+  rbSQL, rbCSV, rbExcel: TRadioButton;
+  btnOK, btnCancel: TButton;
+  grp: TGroupBox;
+begin
+  Result := False;
+  AFormat := dffSQL;
+  Dlg := TForm.Create(Self);
+  try
+    Dlg.Caption := ACaption;
+    Dlg.BorderStyle := bsDialog;
+    Dlg.Position := poOwnerFormCenter;
+    Dlg.Width := 320;
+    Dlg.Height := 200;
+
+    grp := TGroupBox.Create(Dlg);
+    grp.Parent := Dlg;
+    grp.Left := 12;
+    grp.Top := 8;
+    grp.Width := 290;
+    grp.Height := 110;
+    grp.Caption := 'File format';
+
+    rbSQL := TRadioButton.Create(Dlg);
+    rbSQL.Parent := grp;
+    rbSQL.Left := 16;
+    rbSQL.Top := 24;
+    rbSQL.Caption := 'SQL (.sql)';
+    rbSQL.Checked := True;
+
+    rbCSV := TRadioButton.Create(Dlg);
+    rbCSV.Parent := grp;
+    rbCSV.Left := 16;
+    rbCSV.Top := 48;
+    rbCSV.Caption := 'CSV (.csv)';
+
+    rbExcel := TRadioButton.Create(Dlg);
+    rbExcel.Parent := grp;
+    rbExcel.Left := 16;
+    rbExcel.Top := 72;
+    rbExcel.Caption := 'Excel (.xls)';
+
+    btnOK := TButton.Create(Dlg);
+    btnOK.Parent := Dlg;
+    btnOK.Caption := 'OK';
+    btnOK.ModalResult := mrOk;
+    btnOK.Default := True;
+    btnOK.Left := 130;
+    btnOK.Top := 130;
+    btnOK.Width := 75;
+
+    btnCancel := TButton.Create(Dlg);
+    btnCancel.Parent := Dlg;
+    btnCancel.Caption := 'Cancel';
+    btnCancel.ModalResult := mrCancel;
+    btnCancel.Cancel := True;
+    btnCancel.Left := 215;
+    btnCancel.Top := 130;
+    btnCancel.Width := 75;
+
+    if Dlg.ShowModal <> mrOk then
+      Exit;
+
+    Result := True;
+    if rbCSV.Checked then
+      AFormat := dffCSV
+    else if rbExcel.Checked then
+      AFormat := dffExcel
+    else
+      AFormat := dffSQL;
+  finally
+    Dlg.Free;
+  end;
+end;
+
+function TfrmMain.RunExportProgressDialog(AHelper: TExportProgressHelper;
+  const ACaption: string): Boolean;
+var
+  LblRowsHdr: TLabel;
+  LblW: Integer;
+
+  procedure SetupReadOnlyEdit(AEdit: TEdit; const AText: string);
+  begin
+    AEdit.Parent := AHelper.ProgressForm;
+    AEdit.Left := 16;
+    AEdit.Width := LblW;
+    AEdit.ReadOnly := True;
+    AEdit.TabStop := False;
+    AEdit.BorderStyle := bsSingle;
+    AEdit.Color := clWindow;
+    AEdit.Font.Color := clWindowText;
+    AEdit.Text := AText;
+  end;
+
+begin
+  AHelper.ExportBaseCaption := ACaption;
+  AHelper.ProgressForm := TForm.Create(Self);
+  try
+    AHelper.ProgressForm.BorderStyle := bsDialog;
+    AHelper.ProgressForm.BorderIcons := [biSystemMenu];
+    AHelper.ProgressForm.Caption := ACaption;
+    AHelper.ProgressForm.Position := poOwnerFormCenter;
+    AHelper.ProgressForm.Width := 580;
+    AHelper.ProgressForm.Height := 168;
+    AHelper.ProgressForm.FormStyle := fsStayOnTop;
+    AHelper.ProgressForm.OnCloseQuery := AHelper.CloseQuery;
+    LblW := AHelper.ProgressForm.ClientWidth - 32;
+
+    LblRowsHdr := TLabel.Create(AHelper.ProgressForm);
+    LblRowsHdr.Parent := AHelper.ProgressForm;
+    LblRowsHdr.SetBounds(16, 12, LblW, 15);
+    LblRowsHdr.Caption := 'Progress:';
+
+    AHelper.EdRows := TEdit.Create(AHelper.ProgressForm);
+    SetupReadOnlyEdit(AHelper.EdRows, 'Rows: 0 / 0');
+    AHelper.EdRows.Top := 30;
+    AHelper.EdRows.Height := 22;
+
+    AHelper.Bar := TProgressBar.Create(AHelper.ProgressForm);
+    AHelper.Bar.Parent := AHelper.ProgressForm;
+    AHelper.Bar.SetBounds(16, 62, LblW, 20);
+    AHelper.Bar.Min := 0;
+    AHelper.Bar.Max := 100;
+    AHelper.Bar.Smooth := True;
+    AHelper.Bar.Step := 1;
+    SetExportProgressBarPosition(AHelper.Bar, 0);
+
+    AHelper.LblPercent := TLabel.Create(AHelper.ProgressForm);
+    AHelper.LblPercent.Parent := AHelper.ProgressForm;
+    AHelper.LblPercent.SetBounds(16, 88, 80, 17);
+    AHelper.LblPercent.Caption := '0%';
+
+    AHelper.BtnCancel := TButton.Create(AHelper.ProgressForm);
+    AHelper.BtnCancel.Parent := AHelper.ProgressForm;
+    AHelper.BtnCancel.Caption := 'Cancel';
+    AHelper.BtnCancel.SetBounds(AHelper.ProgressForm.ClientWidth - 106, 112, 90, 25);
+    AHelper.BtnCancel.OnClick := AHelper.CancelClick;
+
+    AHelper.CancelRequested := False;
+    GExportProgressHelper := AHelper;
+    Screen.Cursor := crHourGlass;
+    try
+      AHelper.ProgressForm.Show;
+      Application.ProcessMessages;
+      Result := AHelper.ExecuteExport;
+      AHelper.ProgressForm.Close;
+    finally
+      Screen.Cursor := crDefault;
+      GExportProgressHelper := nil;
+    end;
+  finally
+    AHelper.ProgressForm.Free;
+    AHelper.ProgressForm := nil;
+    AHelper.EdRows := nil;
+    AHelper.LblPercent := nil;
+    AHelper.Bar := nil;
+    AHelper.BtnCancel := nil;
+  end;
+end;
+
+function TfrmMain.ExportAllTablesWorker(AProgress: TExportProgressProc): Boolean;
+begin
+  Result := FImportExport.ExportAllTables(FPendingExportFolder, FPendingExportFmt,
+    GetCsvIncludeHeaders, GetCsvDelimiter, FPendingExportCount, AProgress);
+end;
+
+function TfrmMain.ExportDatabaseWorker(AProgress: TExportProgressProc): Boolean;
+begin
+  Result := FImportExport.ExportDatabase(FPendingExportFile, FPendingExportFmt,
+    GetCsvIncludeHeaders, GetCsvDelimiter, AProgress);
+end;
+
+function TfrmMain.ExportTableWorker(AProgress: TExportProgressProc): Boolean;
+begin
+  Result := FImportExport.ExportTable(FPendingExportTable, FPendingExportFile,
+    FPendingExportFmt, GetCsvIncludeHeaders, GetCsvDelimiter, AProgress);
+end;
+
+function TfrmMain.ExportViewWorker(AProgress: TExportProgressProc): Boolean;
+begin
+  Result := FImportExport.ExportView(FPendingExportTable, FPendingExportFile,
+    FPendingExportFmt, FPendingExportSchema, GetCsvIncludeHeaders, GetCsvDelimiter, AProgress);
+end;
+
+procedure TfrmMain.PerformExportView;
+var
+  Fmt: TDataFileFormat;
+  SaveDlg: TSaveDialog;
+  FilePath, DefName, Msg: string;
+  Helper: TExportProgressHelper;
+  ViewName, Schema: string;
+begin
+  if not ResolveViewContext(ViewName, Schema) then
+  begin
+    ShowMessage('Select a view first');
+    Exit;
+  end;
+
+  if not PromptDataFileFormat('Export View', Fmt) then
+    Exit;
+  SaveDlg := TSaveDialog.Create(Self);
+  try
+    SaveDlg.Filter := TImportExport.SaveDialogFilter;
+    DefName := ViewName + TImportExport.FormatExtension(Fmt);
+    SaveDlg.FileName := DefName;
+    SaveDlg.DefaultExt := Copy(TImportExport.FormatExtension(Fmt), 2, MaxInt);
+    case Fmt of
+      dffSQL: SaveDlg.FilterIndex := 1;
+      dffCSV: SaveDlg.FilterIndex := 2;
+      dffExcel: SaveDlg.FilterIndex := 3;
+    end;
+    if not SaveDlg.Execute then
+      Exit;
+    FilePath := SaveDlg.FileName;
+  finally
+    SaveDlg.Free;
+  end;
+
+  FPendingExportTable := ViewName;
+  FPendingExportSchema := Schema;
+  FPendingExportFile := FilePath;
+  FPendingExportFmt := Fmt;
+  Helper := TExportProgressHelper.Create;
+  try
+    Helper.OnExport := ExportViewWorker;
+    if RunExportProgressDialog(Helper, 'Export View') then
+    begin
+      UpdateStatusBar('View exported');
+      Msg := 'View "' + ViewName + '" exported to:' + sLineBreak + FilePath;
+      MessageDlg(Msg, mtInformation, [mbOK], 0);
+    end
+    else if SameText(FDB.LastError, 'Operation cancelled by user.') then
+      UpdateStatusBar('Export cancelled')
+    else if FDB.LastError <> '' then
+      ShowMessage('Export failed: ' + FDB.LastError);
+  finally
+    Helper.Free;
+  end;
+end;
+
+procedure TfrmMain.PerformExportTable;
+var
+  Fmt: TDataFileFormat;
+  SaveDlg: TSaveDialog;
+  FilePath, DefName, Msg: string;
+  Helper: TExportProgressHelper;
+  TableName, Schema: string;
+begin
+  if not ResolveTableContext(TableName, Schema) then
+  begin
+    ShowMessage('Select a table first');
+    Exit;
+  end;
+
+  if not PromptDataFileFormat('Export Table', Fmt) then
+    Exit;
+  SaveDlg := TSaveDialog.Create(Self);
+  try
+    SaveDlg.Filter := TImportExport.SaveDialogFilter;
+    DefName := TableName + TImportExport.FormatExtension(Fmt);
+    SaveDlg.FileName := DefName;
+    SaveDlg.DefaultExt := Copy(TImportExport.FormatExtension(Fmt), 2, MaxInt);
+    case Fmt of
+      dffSQL: SaveDlg.FilterIndex := 1;
+      dffCSV: SaveDlg.FilterIndex := 2;
+      dffExcel: SaveDlg.FilterIndex := 3;
+    end;
+    if not SaveDlg.Execute then
+      Exit;
+    FilePath := SaveDlg.FileName;
+  finally
+    SaveDlg.Free;
+  end;
+
+  FPendingExportTable := TableName;
+  FPendingExportFile := FilePath;
+  FPendingExportFmt := Fmt;
+  Helper := TExportProgressHelper.Create;
+  try
+    Helper.OnExport := ExportTableWorker;
+    if RunExportProgressDialog(Helper, 'Export Table') then
+    begin
+      UpdateStatusBar('Table exported');
+      Msg := 'Table "' + TableName + '" exported to:' + sLineBreak + FilePath;
+      MessageDlg(Msg, mtInformation, [mbOK], 0);
+    end
+    else if SameText(FDB.LastError, 'Operation cancelled by user.') then
+      UpdateStatusBar('Export cancelled')
+    else if FDB.LastError <> '' then
+      ShowMessage('Export failed: ' + FDB.LastError);
+  finally
+    Helper.Free;
+  end;
+end;
+
+procedure TfrmMain.PerformExportAllTables;
+var
+  Fmt: TDataFileFormat;
+  Folder: string;
+  Helper: TExportProgressHelper;
+begin
+  if not FDB.IsOpen then
+  begin
+    ShowMessage('No database connected');
+    Exit;
+  end;
+
+  if not PromptDataFileFormat('Export All Tables', Fmt) then
+    Exit;
+  Folder := '';
+  if not SelectDirectory('Select folder for export', '', Folder) then
+    Exit;
+
+  FPendingExportFolder := Folder;
+  FPendingExportFmt := Fmt;
+  FPendingExportCount := 0;
+  Helper := TExportProgressHelper.Create;
+  try
+    Helper.OnExport := ExportAllTablesWorker;
+    if RunExportProgressDialog(Helper, 'Export All Tables') then
+    begin
+      RefreshStructure;
+      UpdateStatusBar(Format('Exported %d table(s)', [FPendingExportCount]));
+      MessageDlg(Format('Exported %d table(s) to:' + sLineBreak + '%s',
+        [FPendingExportCount, Folder]), mtInformation, [mbOK], 0);
+    end
+    else if SameText(FDB.LastError, 'Operation cancelled by user.') then
+      UpdateStatusBar('Export cancelled')
+    else if FDB.LastError <> '' then
+      ShowMessage('Export failed: ' + FDB.LastError);
+  finally
+    Helper.Free;
+  end;
+end;
+
+procedure TfrmMain.PerformExportDatabase;
+var
+  Fmt: TDataFileFormat;
+  SaveDlg: TSaveDialog;
+  FilePath, DefName, Msg: string;
+  Helper: TExportProgressHelper;
+begin
+  if not FDB.IsOpen then
+  begin
+    ShowMessage('No database connected');
+    Exit;
+  end;
+
+  if not PromptDataFileFormat('Export Database', Fmt) then
+    Exit;
+  SaveDlg := TSaveDialog.Create(Self);
+  try
+    SaveDlg.Filter := TImportExport.SaveDialogFilter;
+    DefName := ChangeFileExt(ExtractFileName(FDB.DatabasePath), '') +
+      TImportExport.FormatExtension(Fmt);
+    SaveDlg.FileName := DefName;
+    SaveDlg.DefaultExt := Copy(TImportExport.FormatExtension(Fmt), 2, MaxInt);
+    case Fmt of
+      dffSQL: SaveDlg.FilterIndex := 1;
+      dffCSV: SaveDlg.FilterIndex := 2;
+      dffExcel: SaveDlg.FilterIndex := 3;
+    end;
+    if not SaveDlg.Execute then
+      Exit;
+    FilePath := SaveDlg.FileName;
+  finally
+    SaveDlg.Free;
+  end;
+
+  FPendingExportFile := FilePath;
+  FPendingExportFmt := Fmt;
+  Helper := TExportProgressHelper.Create;
+  try
+    Helper.OnExport := ExportDatabaseWorker;
+    if RunExportProgressDialog(Helper, 'Export Database') then
+    begin
+      RefreshStructure;
+      UpdateStatusBar('Database exported');
+      if Fmt = dffCSV then
+        Msg := 'Database exported as CSV files to folder:' + sLineBreak +
+          ChangeFileExt(FilePath, '')
+      else
+        Msg := 'Database exported to:' + sLineBreak + FilePath;
+      MessageDlg(Msg, mtInformation, [mbOK], 0);
+    end
+    else if SameText(FDB.LastError, 'Operation cancelled by user.') then
+      UpdateStatusBar('Export cancelled')
+    else if FDB.LastError <> '' then
+      ShowMessage('Export failed: ' + FDB.LastError);
+  finally
+    Helper.Free;
+  end;
+end;
+
+procedure TfrmMain.PerformImportFromFile;
+var
+  OpenDlg: TOpenDialog;
+  FilePath, TableName, Ext: string;
+  Fmt: TDataFileFormat;
+  CreateTable: Boolean;
+  Rows: Integer;
+  Msg: string;
+begin
+  if not FDB.IsOpen then
+  begin
+    ShowMessage('No database connected');
+    Exit;
+  end;
+
+  OpenDlg := TOpenDialog.Create(Self);
+  try
+    OpenDlg.Filter := TImportExport.OpenDialogFilter;
+    if not OpenDlg.Execute then
+      Exit;
+    FilePath := OpenDlg.FileName;
+    if OpenDlg.FilterIndex > 0 then
+      Fmt := TImportExport.FormatFromDialogFilter(OpenDlg.FilterIndex)
+    else
+      Fmt := TImportExport.DetectFormat(FilePath);
+  finally
+    OpenDlg.Free;
+  end;
+
+  TableName := '';
+  CreateTable := False;
+  if Fmt <> dffSQL then
+  begin
+    Ext := ChangeFileExt(ExtractFileName(FilePath), '');
+    TableName := InputBox('Import', 'Target table name:', Ext);
+    if Trim(TableName) = '' then
+      Exit;
+    CreateTable := MessageDlg('Create table if it does not exist?',
+      mtConfirmation, [mbYes, mbNo], 0) = mrYes;
+  end;
+
+  Screen.Cursor := crHourGlass;
+  try
+    if FImportExport.ImportFromFile(FilePath, Fmt, TableName, CreateTable,
+      GetCsvDelimiter, Rows) then
+    begin
+      RefreshStructure;
+      LoadTableData;
+      UpdateDbInfo;
+      if Fmt = dffSQL then
+      begin
+        UpdateStatusBar('SQL script imported');
+        Msg := 'SQL script imported successfully.';
+      end
+      else
+      begin
+        UpdateStatusBar(Format('Imported %d row(s)', [Rows]));
+        Msg := Format('Imported %d row(s) into table "%s".', [Rows, TableName]);
+      end;
+      MessageDlg(Msg, mtInformation, [mbOK], 0);
+    end
+    else
+      ShowMessage('Import failed: ' + FDB.LastError);
+  finally
+    Screen.Cursor := crDefault;
+  end;
+end;
+
+procedure TfrmMain.mnuExportAllClick(Sender: TObject);
+begin
+  PerformExportAllTables;
+end;
+
+procedure TfrmMain.mnuExportDatabaseClick(Sender: TObject);
+begin
+  PerformExportDatabase;
+end;
+
+procedure TfrmMain.mnuImportClick(Sender: TObject);
+begin
+  PerformImportFromFile;
+end;
+
+procedure TfrmMain.btnImportClick(Sender: TObject);
+begin
+  PerformImportFromFile;
+end;
+
+procedure TfrmMain.UpdateDatabaseMenuState;
+begin
+  mnuAttachDatabase.Enabled := FDB.IsOpen;
+  mnuDetachDatabase.Enabled := FDB.IsOpen;
+  mnuCopyDatabase.Enabled := FDB.IsOpen;
+  mnuExportAll.Enabled := FDB.IsOpen;
+  mnuExportDatabase.Enabled := FDB.IsOpen;
+  mnuImport.Enabled := FDB.IsOpen;
+  mnuCompactDatabase.Enabled := FDB.IsOpen;
+  DatabaseInformation1.Enabled := FDB.IsOpen;
+  mnuAnalyzeDatabase.Enabled := FDB.IsOpen;
+  mnuCheckIntegrity.Enabled := FDB.IsOpen;
+  mnuCheckComplete.Enabled := FDB.IsOpen;
+  mnuCheckQuick.Enabled := FDB.IsOpen;
+  if FDB.IsOpen then
+    FillDetachMenu
+  else
+  begin
+    while mnuDetachDatabase.Count > 0 do
+      mnuDetachDatabase.Delete(0);
+    FDetachMenuAliases.Clear;
+  end;
+  UpdateTableMenuState;
+  UpdateViewMenuState;
+  UpdateTriggerMenuState;
+end;
+
+procedure TfrmMain.UpdateViewMenuState;
+var
+  HasView: Boolean;
+begin
+  HasView := FDB.IsOpen and (FCurrentView <> '');
+  mnuCreateView.Enabled := FDB.IsOpen;
+  mnuDropView.Enabled := HasView;
+  mnuRenameView.Enabled := HasView;
+  mnuModifyView.Enabled := HasView;
+  mnuExportView.Enabled := HasView;
+  btnCreateView.Enabled := FDB.IsOpen;
+end;
+
+procedure TfrmMain.UpdateTriggerMenuState;
+var
+  HasTrigger: Boolean;
+begin
+  HasTrigger := FDB.IsOpen and (FCurrentTrigger <> '');
+  mnuCreateTrigger.Enabled := FDB.IsOpen;
+  mnuDropTrigger.Enabled := HasTrigger;
+  mnuRenameTrigger.Enabled := HasTrigger;
+  btnCreateTrigger.Enabled := FDB.IsOpen;
+end;
+
+procedure TfrmMain.UpdateTableMenuState;
+var
+  HasTable: Boolean;
+begin
+  HasTable := FDB.IsOpen and (FCurrentTable <> '');
+  mnuCreateTable.Enabled := FDB.IsOpen;
+  mnuDropTable.Enabled := HasTable;
+  mnuEmptyTable.Enabled := HasTable;
+  mnuRenameTable.Enabled := HasTable;
+  mnuCopyTable.Enabled := HasTable;
+  mnuExportTable.Enabled := HasTable;
+  mnuReindexTable.Enabled := HasTable;
+end;
+
+function TfrmMain.ResolveTableContext(out ATableName, ASchema: string): Boolean;
+var
+  Node: TTreeNode;
+begin
+  Result := False;
+  ATableName := '';
+  ASchema := '';
+  if not FDB.IsOpen then
+    Exit;
+
+  Node := tvStructure.Selected;
+  if (Node <> nil) and (Node.Data = Pointer(1)) then
+  begin
+    ATableName := Node.Text;
+    ASchema := GetNodeSchema(Node);
+    Result := True;
+    Exit;
+  end;
+
+  if FCurrentTable <> '' then
+  begin
+    ATableName := FCurrentTable;
+    ASchema := FCurrentSchema;
+    Result := True;
+  end;
+end;
+
+function TfrmMain.ResolveViewContext(out AViewName, ASchema: string): Boolean;
+var
+  Node: TTreeNode;
+begin
+  Result := False;
+  AViewName := '';
+  ASchema := '';
+  if not FDB.IsOpen then
+    Exit;
+
+  Node := tvStructure.Selected;
+  if (Node <> nil) and (Node.Data = Pointer(2)) then
+  begin
+    AViewName := Node.Text;
+    ASchema := GetNodeSchema(Node);
+    Result := True;
+    Exit;
+  end;
+
+  if FCurrentView <> '' then
+  begin
+    AViewName := FCurrentView;
+    ASchema := FCurrentSchema;
+    Result := True;
+  end;
+end;
+
+function TfrmMain.ResolveTriggerContext(out ATriggerName, ASchema: string): Boolean;
+var
+  Node: TTreeNode;
+begin
+  Result := False;
+  ATriggerName := '';
+  ASchema := '';
+  if not FDB.IsOpen then
+    Exit;
+
+  Node := tvStructure.Selected;
+  if (Node <> nil) and (Node.Data = Pointer(4)) then
+  begin
+    ATriggerName := Node.Text;
+    ASchema := GetNodeSchema(Node);
+    Result := True;
+    Exit;
+  end;
+
+  if FCurrentTrigger <> '' then
+  begin
+    ATriggerName := FCurrentTrigger;
+    ASchema := FCurrentSchema;
+    Result := True;
+  end;
+end;
+
+function TfrmMain.ExecuteSQLDialog(const ACaption, ATitle, AInitialSQL: string; out ASQL: string): Boolean;
+begin
+  frmSQLDialog.Caption := ACaption;
+  frmSQLDialog.lblTitle.Caption := ATitle;
+  frmSQLDialog.memSQL.Lines.Text := AInitialSQL;
+  Result := frmSQLDialog.ShowModal = mrOk;
+  if Result then
+    ASQL := Trim(frmSQLDialog.memSQL.Lines.Text);
+end;
+
+function TfrmMain.GetConfirmDrop: Boolean;
+begin
+  if Assigned(FOptions) then
+    Result := FOptions.ReadBool('Options', 'ConfirmDrop', True)
+  else
+    Result := True;
+end;
+
+procedure TfrmMain.FillDetachMenu;
+var
+  Attached: TArray<TAttachedDatabase>;
+  I: Integer;
+  Item: TMenuItem;
+begin
+  while mnuDetachDatabase.Count > 0 do
+    mnuDetachDatabase.Delete(0);
+  FDetachMenuAliases.Clear;
+  if not FDB.IsOpen then
+    Exit;
+
+  Attached := FDB.GetAttachedDatabases;
+  for I := 0 to High(Attached) do
+  begin
+    if Attached[I].IsMain then
+      Continue;
+    FDetachMenuAliases.Add(Attached[I].Name);
+    Item := TMenuItem.Create(mnuDetachDatabase);
+    if Attached[I].FilePath <> '' then
+      Item.Caption := Attached[I].Name + ' - ' + Attached[I].FilePath
+    else
+      Item.Caption := Attached[I].Name;
+    Item.Tag := FDetachMenuAliases.Count - 1;
+    Item.OnClick := OnDetachClick;
+    mnuDetachDatabase.Add(Item);
+  end;
+
+  if FDetachMenuAliases.Count = 0 then
+  begin
+    Item := TMenuItem.Create(mnuDetachDatabase);
+    Item.Caption := '(none attached)';
+    Item.Enabled := False;
+    mnuDetachDatabase.Add(Item);
+  end;
+end;
+
+procedure TfrmMain.PerformDetach(const AAlias: string);
+begin
+  if AAlias = '' then
+    Exit;
+  if MessageDlg('Detach database "' + AAlias + '"?',
+    mtConfirmation, [mbYes, mbNo], 0) <> mrYes then
+    Exit;
+  if FDB.DetachDatabase(AAlias) then
+  begin
+    if SameText(FCurrentSchema, AAlias) then
+    begin
+      FCurrentTable := '';
+      FCurrentView := '';
+      FCurrentTrigger := '';
+      FCurrentSchema := '';
+    end;
+    RefreshStructure;
+    UpdateStatusBar('Detached: ' + AAlias);
+  end
+  else
+    ShowMessage('Detach failed: ' + FDB.LastError);
+end;
+
+procedure TfrmMain.OnDetachClick(Sender: TObject);
+var
+  Item: TMenuItem;
+begin
+  if not (Sender is TMenuItem) then
+    Exit;
+  Item := TMenuItem(Sender);
+  if (Item.Tag < 0) or (Item.Tag >= FDetachMenuAliases.Count) then
+    Exit;
+  PerformDetach(FDetachMenuAliases[Item.Tag]);
+end;
+
+procedure TfrmMain.mnuAttachDatabaseClick(Sender: TObject);
+var
+  OpenDialog: TOpenDialog;
+  Alias, FilePath: string;
+  Attached: TArray<TAttachedDatabase>;
+  I: Integer;
+begin
+  if not FDB.IsOpen then
+  begin
+    ShowMessage('No database connected');
+    Exit;
+  end;
+
+  OpenDialog := TOpenDialog.Create(Self);
+  try
+    OpenDialog.Filter := 'SQLite Database|*.sqlite;*.db;*.sqlite3|All Files|*.*';
+    if not OpenDialog.Execute then
+      Exit;
+    FilePath := OpenDialog.FileName;
+  finally
+    OpenDialog.Free;
+  end;
+
+  Alias := SuggestDatabaseAlias(FilePath);
+  if not InputQuery('Attach Database', 'Alias name:', Alias) then
+    Exit;
+  Alias := Trim(Alias);
+  if Alias = '' then
+  begin
+    ShowMessage('Alias is required');
+    Exit;
+  end;
+
+  if SameText(ExpandFileName(FilePath), ExpandFileName(FDB.DatabasePath)) then
+  begin
+    ShowMessage('Cannot attach the same file as the main database');
+    Exit;
+  end;
+
+  Attached := FDB.GetAttachedDatabases;
+  for I := 0 to High(Attached) do
+    if (not Attached[I].IsMain) and SameText(ExpandFileName(Attached[I].FilePath), ExpandFileName(FilePath)) then
+    begin
+      ShowMessage('This file is already attached as "' + Attached[I].Name + '"');
+      Exit;
+    end;
+
+  if FDB.AttachDatabase(FilePath, Alias) then
+  begin
+    RefreshStructure;
+    UpdateStatusBar('Attached: ' + Alias);
+  end
+  else
+    ShowMessage('Attach failed: ' + FDB.LastError);
+end;
+
 procedure TfrmMain.mnuExitClick(Sender: TObject);
 begin
   Close;
@@ -1102,6 +2603,141 @@ begin
   end;
   frmCreateTree.ShowModal;
 end;
+
+procedure TfrmMain.mnuDropTableClick(Sender: TObject);
+var
+  TableName, Schema, Msg: string;
+  Confirm: Integer;
+begin
+  if not ResolveTableContext(TableName, Schema) then
+  begin
+    ShowMessage('Select a table first');
+    Exit;
+  end;
+  if GetConfirmDrop then
+  begin
+    if (Schema <> '') and not SameText(Schema, 'main') then
+      Msg := 'Drop table "' + Schema + '.' + TableName + '"?'
+    else
+      Msg := 'Drop table "' + TableName + '"?';
+    Msg := Msg + sLineBreak + 'This cannot be undone.';
+    Confirm := MessageDlg(Msg, mtWarning, [mbYes, mbNo], 0);
+    if Confirm <> mrYes then
+      Exit;
+  end;
+  if FDB.DropTable(TableName, Schema) then
+  begin
+    FCurrentTable := '';
+    FCurrentTableName := '';
+    RefreshStructure;
+    UpdateTableMenuState;
+    UpdateStatusBar('Table dropped');
+  end
+  else
+    ShowMessage('Error dropping table: ' + FDB.LastError);
+end;
+
+procedure TfrmMain.mnuEmptyTableClick(Sender: TObject);
+begin
+  btnEmptyTableClick(Sender);
+end;
+
+procedure TfrmMain.mnuRenameTableClick(Sender: TObject);
+var
+  TableName, Schema, NewName: string;
+begin
+  if not ResolveTableContext(TableName, Schema) then
+  begin
+    ShowMessage('Select a table first');
+    Exit;
+  end;
+  NewName := TableName;
+  if not InputQuery('Rename Table', 'New table name:', NewName) then
+    Exit;
+  NewName := Trim(NewName);
+  if NewName = '' then
+  begin
+    ShowMessage('Table name cannot be empty');
+    Exit;
+  end;
+  if SameText(NewName, TableName) then
+    Exit;
+  if FDB.RenameTable(TableName, NewName, Schema) then
+  begin
+    SaveLastSelectedTable(NewName);
+    RefreshStructure;
+    SelectTableInTree(NewName, Schema);
+    UpdateStatusBar('Table renamed');
+  end
+  else
+    ShowMessage('Error renaming table: ' + FDB.LastError);
+end;
+
+procedure TfrmMain.mnuCopyTableClick(Sender: TObject);
+var
+  TableName, Schema, DestName: string;
+  WithData: Boolean;
+  Choice: Integer;
+begin
+  if not ResolveTableContext(TableName, Schema) then
+  begin
+    ShowMessage('Select a table first');
+    Exit;
+  end;
+  DestName := TableName + '_copy';
+  if not InputQuery('Copy Table', 'Destination table name:', DestName) then
+    Exit;
+  DestName := Trim(DestName);
+  if DestName = '' then
+  begin
+    ShowMessage('Table name cannot be empty');
+    Exit;
+  end;
+  if SameText(DestName, TableName) then
+  begin
+    ShowMessage('Destination name must differ from source table');
+    Exit;
+  end;
+  Choice := MessageDlg('Copy row data to the new table?', mtConfirmation,
+    [mbYes, mbNo, mbCancel], 0);
+  if Choice = mrCancel then
+    Exit;
+  WithData := Choice = mrYes;
+  if FDB.CopyTable(TableName, DestName, WithData, Schema) then
+  begin
+    SaveLastSelectedTable(DestName);
+    RefreshStructure;
+    SelectTableInTree(DestName, Schema);
+    UpdateStatusBar('Table copied');
+    MessageDlg('Table copied to "' + DestName + '"', mtInformation, [mbOK], 0);
+  end
+  else
+    ShowMessage('Error copying table: ' + FDB.LastError);
+end;
+
+procedure TfrmMain.mnuExportTableClick(Sender: TObject);
+begin
+  PerformExportTable;
+end;
+
+procedure TfrmMain.mnuReindexTableClick(Sender: TObject);
+var
+  TableName, Schema: string;
+begin
+  if not ResolveTableContext(TableName, Schema) then
+  begin
+    ShowMessage('Select a table first');
+    Exit;
+  end;
+  if FDB.ReindexTable(TableName, Schema) then
+  begin
+    UpdateStatusBar('Table reindexed');
+    MessageDlg('Table "' + TableName + '" reindexed successfully', mtInformation, [mbOK], 0);
+  end
+  else
+    ShowMessage('Error reindexing table: ' + FDB.LastError);
+end;
+
 procedure TfrmMain.mnuCreateIndexClick(Sender: TObject);
 begin
   if not FDB.IsOpen then
@@ -1191,15 +2827,271 @@ begin
     ShowMessage('Error reindexing: ' + Res.ErrorMessage);
   end;
 end;
+
+procedure TfrmMain.mnuCreateViewClick(Sender: TObject);
+var
+  SQL: string;
+  Res: TQueryResult;
+begin
+  if not FDB.IsOpen then
+  begin
+    ShowMessage('No database connected');
+    Exit;
+  end;
+  if ExecuteSQLDialog('Create View', 'Enter CREATE VIEW statement:',
+    'CREATE VIEW view_name AS' + sLineBreak + 'SELECT * FROM table_name', SQL) then
+  begin
+    if SQL = '' then
+      Exit;
+    Res := FDB.ExecuteSQL(SQL);
+    if Res.Success then
+    begin
+      RefreshStructure;
+      UpdateViewMenuState;
+      UpdateStatusBar('View created');
+    end
+    else
+      ShowMessage('Error creating view: ' + Res.ErrorMessage);
+  end;
+end;
+
+procedure TfrmMain.btnCreateViewClick(Sender: TObject);
+begin
+  mnuCreateViewClick(Sender);
+end;
+
+procedure TfrmMain.mnuDropViewClick(Sender: TObject);
+var
+  ViewName, Schema, Msg: string;
+  Confirm: Integer;
+begin
+  if not ResolveViewContext(ViewName, Schema) then
+  begin
+    ShowMessage('Select a view first');
+    Exit;
+  end;
+  if GetConfirmDrop then
+  begin
+    if (Schema <> '') and not SameText(Schema, 'main') then
+      Msg := 'Drop view "' + Schema + '.' + ViewName + '"?'
+    else
+      Msg := 'Drop view "' + ViewName + '"?';
+    Msg := Msg + sLineBreak + 'This cannot be undone.';
+    Confirm := MessageDlg(Msg, mtWarning, [mbYes, mbNo], 0);
+    if Confirm <> mrYes then
+      Exit;
+  end;
+  if FDB.DropView(ViewName, Schema) then
+  begin
+    FCurrentView := '';
+    RefreshStructure;
+    UpdateViewMenuState;
+    UpdateStatusBar('View dropped');
+  end
+  else
+    ShowMessage('Error dropping view: ' + FDB.LastError);
+end;
+
+procedure TfrmMain.mnuRenameViewClick(Sender: TObject);
+var
+  ViewName, Schema, NewName: string;
+begin
+  if not ResolveViewContext(ViewName, Schema) then
+  begin
+    ShowMessage('Select a view first');
+    Exit;
+  end;
+  NewName := ViewName;
+  if not InputQuery('Rename View', 'New view name:', NewName) then
+    Exit;
+  NewName := Trim(NewName);
+  if NewName = '' then
+  begin
+    ShowMessage('View name cannot be empty');
+    Exit;
+  end;
+  if SameText(NewName, ViewName) then
+    Exit;
+  if FDB.RenameView(ViewName, NewName, Schema) then
+  begin
+    SaveLastSelectedTable(NewName);
+    RefreshStructure;
+    SelectViewInTree(NewName, Schema);
+    UpdateViewMenuState;
+    UpdateStatusBar('View renamed');
+  end
+  else
+    ShowMessage('Error renaming view: ' + FDB.LastError);
+end;
+
+procedure TfrmMain.mnuModifyViewClick(Sender: TObject);
+var
+  ViewName, Schema, SQL, NewSQL: string;
+  Res: TQueryResult;
+begin
+  if not ResolveViewContext(ViewName, Schema) then
+  begin
+    ShowMessage('Select a view first');
+    Exit;
+  end;
+  SQL := FDB.GetObjectSQL(ViewName, 'view', Schema);
+  if SQL = '' then
+  begin
+    ShowMessage('Cannot read view definition');
+    Exit;
+  end;
+  if MessageDlg('Modifying a view will drop and recreate it.' + sLineBreak +
+    'Continue?', mtConfirmation, [mbYes, mbNo], 0) <> mrYes then
+    Exit;
+  if ExecuteSQLDialog('Modify View', 'Edit view definition:', SQL, NewSQL) then
+  begin
+    if NewSQL = '' then
+      Exit;
+    if not FDB.DropView(ViewName, Schema) then
+    begin
+      ShowMessage('Error dropping view: ' + FDB.LastError);
+      Exit;
+    end;
+    Res := FDB.ExecuteSQL(NewSQL);
+    if Res.Success then
+    begin
+      RefreshStructure;
+      SelectViewInTree(ViewName, Schema);
+      LoadTableData;
+      UpdateViewMenuState;
+      UpdateStatusBar('View modified');
+    end
+    else
+      ShowMessage('Error modifying view: ' + Res.ErrorMessage + sLineBreak +
+        'The view may have been dropped.');
+  end;
+end;
+
+procedure TfrmMain.mnuExportViewClick(Sender: TObject);
+begin
+  PerformExportView;
+end;
+
+procedure TfrmMain.mnuCreateTriggerClick(Sender: TObject);
+var
+  SQL: string;
+  Res: TQueryResult;
+begin
+  if not FDB.IsOpen then
+  begin
+    ShowMessage('No database connected');
+    Exit;
+  end;
+  if ExecuteSQLDialog('Create Trigger', 'Enter CREATE TRIGGER statement:',
+    'CREATE TRIGGER trigger_name' + sLineBreak +
+    'AFTER INSERT ON table_name' + sLineBreak +
+    'BEGIN' + sLineBreak +
+    '  -- statements' + sLineBreak +
+    'END;', SQL) then
+  begin
+    if SQL = '' then
+      Exit;
+    Res := FDB.ExecuteSQL(SQL);
+    if Res.Success then
+    begin
+      RefreshStructure;
+      UpdateTriggerMenuState;
+      UpdateStatusBar('Trigger created');
+    end
+    else
+      ShowMessage('Error creating trigger: ' + Res.ErrorMessage);
+  end;
+end;
+
+procedure TfrmMain.btnCreateTriggerClick(Sender: TObject);
+begin
+  mnuCreateTriggerClick(Sender);
+end;
+
+procedure TfrmMain.mnuDropTriggerClick(Sender: TObject);
+var
+  TriggerName, Schema, Msg: string;
+  Confirm: Integer;
+begin
+  if not ResolveTriggerContext(TriggerName, Schema) then
+  begin
+    ShowMessage('Select a trigger first');
+    Exit;
+  end;
+  if GetConfirmDrop then
+  begin
+    if (Schema <> '') and not SameText(Schema, 'main') then
+      Msg := 'Drop trigger "' + Schema + '.' + TriggerName + '"?'
+    else
+      Msg := 'Drop trigger "' + TriggerName + '"?';
+    Msg := Msg + sLineBreak + 'This cannot be undone.';
+    Confirm := MessageDlg(Msg, mtWarning, [mbYes, mbNo], 0);
+    if Confirm <> mrYes then
+      Exit;
+  end;
+  if FDB.DropTrigger(TriggerName, Schema) then
+  begin
+    FCurrentTrigger := '';
+    RefreshStructure;
+    UpdateTriggerMenuState;
+    UpdateStatusBar('Trigger dropped');
+  end
+  else
+    ShowMessage('Error dropping trigger: ' + FDB.LastError);
+end;
+
+procedure TfrmMain.mnuRenameTriggerClick(Sender: TObject);
+var
+  TriggerName, Schema, NewName: string;
+begin
+  if not ResolveTriggerContext(TriggerName, Schema) then
+  begin
+    ShowMessage('Select a trigger first');
+    Exit;
+  end;
+  NewName := TriggerName;
+  if not InputQuery('Rename Trigger', 'New trigger name:', NewName) then
+    Exit;
+  NewName := Trim(NewName);
+  if NewName = '' then
+  begin
+    ShowMessage('Trigger name cannot be empty');
+    Exit;
+  end;
+  if SameText(NewName, TriggerName) then
+    Exit;
+  if FDB.RenameTrigger(TriggerName, NewName, Schema) then
+  begin
+    RefreshStructure;
+    SelectTriggerInTree(NewName, Schema);
+    UpdateTriggerMenuState;
+    UpdateStatusBar('Trigger renamed');
+  end
+  else
+    ShowMessage('Error renaming trigger: ' + FDB.LastError);
+end;
+
+procedure TfrmMain.mnuSQLiteHomeClick(Sender: TObject);
+begin
+  ShellExecute(Handle, nil, 'https://sqlite.org/', nil, nil, SW_SHOW);
+end;
+
+procedure TfrmMain.mnuSQLiteSyntaxClick(Sender: TObject);
+begin
+  ShellExecute(Handle, nil, 'https://sqlite.org/lang.html', nil, nil, SW_SHOW);
+end;
+
 procedure TfrmMain.mnuOptionsClick(Sender: TObject);
 begin
   frmOptions.ShowModal;
 end;
+
 procedure TfrmMain.mnuAISettingsMainClick(Sender: TObject);
 begin
   // Called from main menu - delegate to context menu handler
   mnuAISettingsClick(nil);
 end;
+
 procedure TfrmMain.memSQLKeyPress(Sender: TObject; var Key: Char);
 begin
   if (Key = #10) and (GetKeyState(VK_CONTROL) < 0) then
@@ -1208,10 +3100,12 @@ begin
     btnRunQueryClick(Sender);
   end;
 end;
+
 procedure TfrmMain.mnuAboutClick(Sender: TObject);
 begin
   frmAbout.ShowModal;
 end;
+
 procedure TfrmMain.tvStructureClick(Sender: TObject);
 var
   Node: TTreeNode;
@@ -1228,9 +3122,11 @@ begin
     begin
       tsBrowse.TabVisible := True;
       tsTable.TabVisible  := True;
+      FCurrentSchema := GetNodeSchema(Node);
       FCurrentTable := Node.Text;
       FCurrentTableName := Node.Text;
       FCurrentView := '';
+      FCurrentTrigger := '';
       FCurrentIndex := '';
       FCurrentIndexTable := '';
       // Reset search context when switching tables
@@ -1239,7 +3135,7 @@ begin
       FBrowseSortCol := -1;
       FBrowseSortAsc := True;
       lblTable.Caption := 'TABLE';
-      edtBrowseTitle.Text := FCurrentTable;
+      edtBrowseTitle.Text := BrowseObjectCaption;
       // Reset offset when switching tables
       edtOffset.Text := '0';
       SaveLastSelectedTable(FCurrentTable);
@@ -1250,13 +3146,18 @@ begin
       pcMain.ActivePageIndex := 0;
       sgBrowse.SetFocus;
       tsIndex.TabVisible := False;
+      UpdateTableMenuState;
+      UpdateViewMenuState;
+      UpdateTriggerMenuState;
     end
     else if NodeType = 2 then // View
     begin
       tsBrowse.TabVisible := True;
       tsTable.TabVisible  := True;
+      FCurrentSchema := GetNodeSchema(Node);
       FCurrentView := Node.Text;
       FCurrentTable := '';
+      FCurrentTrigger := '';
       FCurrentIndex := '';
       FCurrentIndexTable := '';
       // Reset search context when switching views
@@ -1265,7 +3166,7 @@ begin
       FBrowseSortCol := -1;
       FBrowseSortAsc := True;
       lblTable.Caption := 'VIEW';
-      edtBrowseTitle.Text := FCurrentView;
+      edtBrowseTitle.Text := BrowseObjectCaption;
       // Reset offset when switching views
       edtOffset.Text := '0';
       SaveLastSelectedTable(FCurrentView);
@@ -1274,6 +3175,9 @@ begin
       pcMain.ActivePageIndex := 0;
       sgBrowse.SetFocus;
       tsIndex.TabVisible := False;
+      UpdateTableMenuState;
+      UpdateViewMenuState;
+      UpdateTriggerMenuState;
     end
     else if NodeType = 3 then // Index
     begin
@@ -1282,14 +3186,35 @@ begin
       FCurrentIndex := Node.Text;
       FCurrentTable := '';
       FCurrentView := '';
+      FCurrentTrigger := '';
       // Load index data
       LoadIndexData;
       // Show tsIndex and tsExecute tabs
       pcMain.ActivePageIndex := 1;
       tsBrowse.TabVisible := False;
+      UpdateTableMenuState;
+      UpdateViewMenuState;
+      UpdateTriggerMenuState;
+    end
+    else if NodeType = 4 then // Trigger
+    begin
+      tsBrowse.TabVisible := False;
+      tsTable.TabVisible := False;
+      tsIndex.TabVisible := False;
+      FCurrentSchema := GetNodeSchema(Node);
+      FCurrentTrigger := Node.Text;
+      FCurrentTable := '';
+      FCurrentView := '';
+      FCurrentIndex := '';
+      memSQL.Lines.Text := FDB.GetObjectSQL(FCurrentTrigger, 'trigger', FCurrentSchema);
+      pcMain.ActivePage := tsExecute;
+      UpdateTableMenuState;
+      UpdateViewMenuState;
+      UpdateTriggerMenuState;
     end;
   end;
 end;
+
 procedure TfrmMain.tvStructureDblClick(Sender: TObject);
 begin
   tvStructureClick(Sender);
@@ -1504,19 +3429,7 @@ begin
     ShowMessage('Please select a row to edit');
     Exit;
   end;
-  // Get actual rowid from the database
-  // We need to query the database to get the real rowid
-  if FIsSearching then
-  begin
-    // Get rowid from search results with WHERE clause
-    SQL := Format('SELECT rowid FROM "%s" WHERE %s ORDER BY rowid LIMIT 1 OFFSET %d',
-      [FCurrentTable, FSearchWhereClause, (SelectedRow - 1) + StrToIntDef(edtOffset.Text, 0)]);
-  end
-  else
-  begin
-    SQL := Format('SELECT rowid FROM "%s" ORDER BY rowid LIMIT 1 OFFSET %d',
-      [FCurrentTable, (SelectedRow - 1) + StrToIntDef(edtOffset.Text, 0)]);
-  end;
+  SQL := BrowseRowIdSql(SelectedRow);
   QueryResult := FDB.ExecuteSQL(SQL);
   
   if QueryResult.Success and (QueryResult.RowCount > 0) then
@@ -1527,7 +3440,7 @@ begin
   // Get table structure
   Columns := TableInfo;
   // Create and show edit dialog
-  Frm := TfrmRowEdit.CreateEdit(Self, FDB, FCurrentTable, Columns, RowId, False);
+  Frm := TfrmRowEdit.CreateEdit(Self, FDB, BrowseTableSqlRef, Columns, RowId, False);
   try
     if Frm.ShowModal = mrOk then
     begin
@@ -1542,48 +3455,34 @@ begin
 end;
 procedure TfrmMain.btnEmptyTableClick(Sender: TObject);
 var
-  Node: TTreeNode;
-  TableName: string;
+  TableName, Schema, Msg: string;
   Confirm: Integer;
-  Res: TQueryResult;
 begin
-  if not FDB.IsOpen then
+  if not ResolveTableContext(TableName, Schema) then
   begin
-    ShowMessage('No database connected');
+    ShowMessage('Select a table first');
     Exit;
   end;
-  Node := tvStructure.Selected;
-  if Node = nil then
-  begin
-    ShowMessage('Please select a table to empty');
+  if (Schema <> '') and not SameText(Schema, 'main') then
+    Msg := Schema + '.' + TableName
+  else
+    Msg := TableName;
+  Confirm := MessageDlg('Empty table "' + Msg + '"?' + sLineBreak +
+    'All row data will be deleted.',
+    mtConfirmation, [mbYes, mbNo], 0);
+  if Confirm <> mrYes then
     Exit;
-  end;
-  // Check if it's an table node (Data = Pointer(1))
-  if Node.Data <> Pointer(1) then
+  if FDB.EmptyTable(TableName, Schema) then
   begin
-    ShowMessage('Please select a table to empty');
-    Exit;
-  end;
-  TableName := Node.Text;
-  Confirm := MessageDlg('Are you sure you want to empty the table "' + TableName + '"? All its data will be lost!',
-                        mtConfirmation, [mbYes, mbNo], 0);
-  if Confirm = mrYes then
-  begin
-    Res := FDB.ExecuteSQL(Format('DELETE FROM "%s"', [TableName]));
-    if Res.Success then
-    begin
-      ShowMessage('Table "' + TableName + '" is empty');
-      tvStructureClick(nil);
-    end
-    else
-    begin
-      ShowMessage('Error deleting rows: ' + Res.ErrorMessage);
-    end;
-  end;
+    LoadTableData;
+    UpdateStatusBar('Table emptied');
+  end
+  else
+    ShowMessage('Error emptying table: ' + FDB.LastError);
 end;
 procedure TfrmMain.btnDeleteRecordClick(Sender: TObject);
 var
-  I, RowOffset: Integer;
+  I: Integer;
   Confirm: Integer;
   RowIds: TStringList;
   SQL: string;
@@ -1610,23 +3509,12 @@ begin
     ShowMessage('Please select at least one row to delete');
     Exit;
   end;
-  RowOffset := StrToIntDef(edtOffset.Text, 0);
   RowIds := TStringList.Create;
   try
     // Get rowids for all selected rows
     for I := SelTop to SelBottom do
     begin
-      if FIsSearching then
-      begin
-        // Get rowid from search results with WHERE clause
-        SQL := Format('SELECT rowid FROM "%s" WHERE %s ORDER BY rowid LIMIT 1 OFFSET %d',
-          [FCurrentTable, FSearchWhereClause, (I - 1) + RowOffset]);
-      end
-      else
-      begin
-        SQL := Format('SELECT rowid FROM "%s" ORDER BY rowid LIMIT 1 OFFSET %d',
-          [FCurrentTable, (I - 1) + RowOffset]);
-      end;
+      SQL := BrowseRowIdSql(I);
       QueryResult := FDB.ExecuteSQL(SQL);
       if QueryResult.Success and (QueryResult.RowCount > 0) then
         RowIds.Add(VarToStr(QueryResult.Rows[0][0]));
@@ -1648,14 +3536,14 @@ begin
       try
         for I := 0 to RowIds.Count - 1 do
         begin
-          SQL := Format('DELETE FROM "%s" WHERE rowid = %s', [FCurrentTable, RowIds[I]]);
+          SQL := Format('DELETE FROM %s WHERE rowid = %s', [BrowseTableSqlRef, RowIds[I]]);
           FDB.ExecuteSQL(SQL);
         end;
         FDB.CommitTransaction;
         
         // Refresh data
         LoadTableData;
-        ShowMessage(IntToStr(RowIds.Count) + ' record(s) deleted successfully');
+        //ShowMessage(IntToStr(RowIds.Count) + ' record(s) deleted successfully');
       except
         FDB.RollbackTransaction;
         raise;
@@ -1683,13 +3571,13 @@ begin
   // Get table structure
   Columns := TableInfo;
   // Create and show add dialog
-  Frm := TfrmRowEdit.CreateEdit(Self, FDB, FCurrentTable, Columns, '', True);
+  Frm := TfrmRowEdit.CreateEdit(Self, FDB, BrowseTableSqlRef, Columns, '', True);
   try
     if Frm.ShowModal = mrOk then
     begin
       // Refresh data
       LoadTableData;
-      ShowMessage('Record added successfully');
+      //ShowMessage('Record added successfully');
     end;
   finally
     Frm.Free;
@@ -1765,7 +3653,7 @@ begin
     if Frm.ShowModal = mrOk then
     begin
       WhereClause := Frm.GetWhereClause;
-      CountSQL := Format('SELECT COUNT(*) FROM "%s" WHERE %s', [FCurrentTable, WhereClause]);
+      CountSQL := Format('SELECT COUNT(*) FROM %s WHERE %s', [BrowseTableSqlRef, WhereClause]);
       CountResult := FDB.ExecuteSQL(CountSQL);
       if CountResult.Success and (CountResult.RowCount > 0) then
       begin
@@ -2073,6 +3961,7 @@ var
   Grid: TStringGrid;
   IsSelected: Boolean;
   ColTypes: TArray<TSQLiteColumnType>;
+  ColType: TSQLiteColumnType;
 begin
   Grid := Sender as TStringGrid;
   if (Grid = sgBrowse) and (Grid.FixedRows > 0) and (ARow < Grid.FixedRows) and (ACol >= Grid.FixedCols) then
@@ -2148,8 +4037,26 @@ begin
   // Check if this cell is selected
   IsSelected := (ARow >= Grid.Selection.Top) and (ARow <= Grid.Selection.Bottom) and
                 (ACol >= Grid.Selection.Left) and (ACol <= Grid.Selection.Right);
-  // Determine color based on column type
-  case ColTypes[ColIndex] of
+  // NULL cells — always red, regardless of column type
+  if CellText = '<NULL>' then
+  begin
+    if IsSelected then
+      CellColor := clOrange
+    else
+      CellColor := clNullCell;
+    Grid.Canvas.Brush.Color := CellColor;
+    Grid.Canvas.FillRect(Rect);
+    Grid.Canvas.Pen.Color := clWhite;
+    Grid.Canvas.MoveTo(Rect.Left, Rect.Bottom);
+    Grid.Canvas.LineTo(Rect.Right, Rect.Bottom);
+    Grid.Canvas.Pen.Color := clBlack;
+    Grid.Canvas.MoveTo(Rect.Right, Rect.Top);
+    Grid.Canvas.LineTo(Rect.Right, Rect.Bottom);
+    Exit;
+  end;
+  ColType := EffectiveColumnType(ColTypes, ColIndex, CellText);
+  // Determine color based on column/cell type
+  case ColType of
     sctInteger:
       begin
         if IsSelected then
@@ -2188,16 +4095,6 @@ begin
   else
     CellColor := Grid.Color;
   end;
-  // Check if cell is NULL (using special marker) - color it and don't draw text
-  if CellText = '<NULL>' then
-  begin
-    if IsSelected then
-      CellColor := clOrange
-    else
-      CellColor := clNullCell;
-    CellText := '';  // Clear text for NULL - show empty cell with color
-  end
-  else
   if Copy(CellText, 1, 4) = 'BLOB' then
   begin
     if IsSelected then
@@ -2324,6 +4221,76 @@ begin
     end;
   end;
 end;
+function NormalizeTableSchema(const ASchema: string): string;
+begin
+  if (ASchema = '') or SameText(ASchema, 'main') then
+    Result := ''
+  else
+    Result := ASchema;
+end;
+
+function TableSchemaMatches(const ANodeSchema, ATargetSchema: string): Boolean;
+begin
+  Result := SameText(NormalizeTableSchema(ANodeSchema), NormalizeTableSchema(ATargetSchema));
+end;
+
+procedure TfrmMain.SelectTableInTree(const ATableName, ASchema: string);
+var
+  I: Integer;
+  Node: TTreeNode;
+begin
+  for I := 0 to tvStructure.Items.Count - 1 do
+  begin
+    Node := tvStructure.Items[I];
+    if (Node.Data = Pointer(1)) and SameText(Node.Text, ATableName) and
+      TableSchemaMatches(GetNodeSchema(Node), ASchema) then
+    begin
+      tvStructure.Selected := Node;
+      Node.MakeVisible;
+      tvStructureClick(nil);
+      Break;
+    end;
+  end;
+end;
+
+procedure TfrmMain.SelectViewInTree(const AViewName, ASchema: string);
+var
+  I: Integer;
+  Node: TTreeNode;
+begin
+  for I := 0 to tvStructure.Items.Count - 1 do
+  begin
+    Node := tvStructure.Items[I];
+    if (Node.Data = Pointer(2)) and SameText(Node.Text, AViewName) and
+      TableSchemaMatches(GetNodeSchema(Node), ASchema) then
+    begin
+      tvStructure.Selected := Node;
+      Node.MakeVisible;
+      tvStructureClick(nil);
+      Break;
+    end;
+  end;
+end;
+
+procedure TfrmMain.SelectTriggerInTree(const ATriggerName, ASchema: string);
+var
+  I: Integer;
+  Node: TTreeNode;
+begin
+  for I := 0 to tvStructure.Items.Count - 1 do
+  begin
+    Node := tvStructure.Items[I];
+    if (Node.Data = Pointer(4)) and SameText(Node.Text, ATriggerName) and
+      TableSchemaMatches(GetNodeSchema(Node), ASchema) then
+    begin
+      tvStructure.Selected := Node;
+      Node.MakeVisible;
+      tvStructureClick(nil);
+      Break;
+    end;
+  end;
+end;
+
 procedure TfrmMain.SaveLastSelectedTable(const ATableName: string);
 begin
   FReg.RootKey := HKEY_CURRENT_USER;
@@ -2345,8 +4312,8 @@ end;
 procedure TfrmMain.LoadLastSelectedTable;
 var
   LastTable: string;
-  Node: TTreeNode;
   I: Integer;
+  Node: TTreeNode;
 begin
   FReg.RootKey := HKEY_CURRENT_USER;
   FReg.Access := KEY_READ;
@@ -2356,22 +4323,19 @@ begin
       LastTable := FReg.ReadString('LastSelectedTable');
       if (LastTable <> '') and (tvStructure.Items.Count > 0) then
       begin
-        // Search for the table/view in the tree
-        for I := 0 to tvStructure.Items.Count - 1 do
-        begin
-          Node := tvStructure.Items[I];
-          // Check if it's a table or view node (has Data <> nil)
-          if Node.Data <> nil then
+        SelectTableInTree(LastTable, '');
+        if FCurrentTable = '' then
+          for I := 0 to tvStructure.Items.Count - 1 do
           begin
-            if Node.Text = LastTable then
+            Node := tvStructure.Items[I];
+            if (Node.Data = Pointer(2)) and (Node.Text = LastTable) then
             begin
-              // Select this node and trigger load
               tvStructure.Selected := Node;
+              Node.MakeVisible;
               tvStructureClick(nil);
               Break;
             end;
           end;
-        end;
       end;
     except
     end;
@@ -2381,13 +4345,27 @@ end;
 procedure TfrmMain.sgBrowseMouseWheelUp(Sender: TObject; Shift: TShiftState; MousePos: TPoint; var Handled: Boolean);
 begin
   Handled := True;
-  if (Sender as TStringGrid).TopRow >= 3 then
-    (Sender as TStringGrid).TopRow := (Sender as TStringGrid).TopRow - 3;
+  var G := Sender as TStringGrid;
+  var SavedLeft := G.LeftCol;
+  try
+    if G.TopRow >= 3 then
+      G.TopRow := G.TopRow - 3;
+  finally
+    // Keep horizontal scroll position when vertical scroll changes.
+    G.LeftCol := SavedLeft;
+  end;
 end;
 procedure TfrmMain.sgBrowseMouseWheelDown(Sender: TObject; Shift: TShiftState; MousePos: TPoint; var Handled: Boolean);
 begin
   Handled := True;
-  (Sender as TStringGrid).TopRow := (Sender as TStringGrid).TopRow + 3;
+  var G := Sender as TStringGrid;
+  var SavedLeft := G.LeftCol;
+  try
+    G.TopRow := G.TopRow + 3;
+  finally
+    // Keep horizontal scroll position when vertical scroll changes.
+    G.LeftCol := SavedLeft;
+  end;
 end;
 procedure TfrmMain.SaveRecentQueries;
 var
@@ -2666,7 +4644,7 @@ begin
     // Get BLOB data from database
     if FDB.IsOpen and (FCurrentTable <> '') then
     begin
-      BlobData := FDB.GetBlobData(FCurrentTable, PopupMenuRow - 1 + StrToIntDef(edtOffset.Text, 0), PopupMenuCol);
+      BlobData := FDB.GetBlobData(BrowseTableSqlRef, PopupMenuRow - 1 + StrToIntDef(edtOffset.Text, 0), PopupMenuCol);
       if Length(BlobData) > 0 then
       begin
         // Convert BLOB to string (try UTF-8 first, then ANSI)
