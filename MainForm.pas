@@ -7,7 +7,8 @@ uses
   System.ImageList, Vcl.BaseImageCollection, Vcl.ImageCollection, System.UITypes,
   DBModule, ImportExport, Vcl.VirtualImageList, System.IniFiles, System.Generics.Collections,
   System.Generics.Defaults, SQLite3, Vcl.ToolWin, Win.Registry, Clipbrd, SynEdit,
-  SynEditHighlighter, SynHighlighterSQL, SearchForm, AIService, AIOptionsForm, SQLAdvancedFormatter;
+  SynEditHighlighter, SynHighlighterSQL, SynCompletionProposal, SearchForm, AIService,
+  AIOptionsForm, SQLAdvancedFormatter;
 
 type
   TFormExportProc = function(AProgress: TExportProgressProc): Boolean of object;
@@ -141,6 +142,7 @@ type
     edtBrowseTitle: TEdit;
     cbHistory: TComboBox;
     SynSQLSyn1: TSynSQLSyn;
+    SynSQLCompletion: TSynCompletionProposal;
     Timer1: TTimer;
     btnSearchTable: TButton;
     Splitter1: TSplitter;
@@ -274,6 +276,10 @@ type
     procedure FormShow(Sender: TObject);
     procedure FormActivate(Sender: TObject);
     procedure memSQLKeyPress(Sender: TObject; var Key: Char);
+    procedure SynSQLCompletionExecute(Kind: SynCompletionType; Sender: TObject;
+      var CurrentInput: UnicodeString; var x, y: Integer; var CanExecute: Boolean);
+    procedure SynSQLCompletionShow(Sender: TObject);
+    procedure SynSQLCompletionClose(Sender: TObject);
     procedure cbHistoryChange(Sender: TObject);
     procedure sgBrowseKeyPress(Sender: TObject; var Key: Char);
     procedure tvStructureKeyPress(Sender: TObject; var Key: Char);
@@ -387,6 +393,10 @@ type
     function ExportViewWorker(AProgress: TExportProgressProc): Boolean;
     function RunExportProgressDialog(AHelper: TExportProgressHelper;
       const ACaption: string): Boolean;
+    function GetSQLCompletionLineHeight: Integer;
+    procedure ApplySQLCompletionFormSize;
+    procedure ScheduleSQLCompletionFixSize;
+    procedure SQLCompletionFixTimer(Sender: TObject);
   public
     FDB: TSQLiteHandler;
     FCurrentTable: string;
@@ -413,7 +423,7 @@ implementation
 {$R *.dfm}
 uses
   Vcl.FileCtrl, Winapi.ShellAPI, Winapi.CommCtrl, OptionsForm, AboutForm, CreateTreeForm,
-  CreateIndexForm, AddColumnForm, SQLDialogForm, RowEditForm;
+  CreateIndexForm, AddColumnForm, SQLDialogForm, RowEditForm, SQLFieldCompletion;
 
 type
   TCompactProgressHelper = class
@@ -440,6 +450,10 @@ begin
   if not CancelRequested then
     CancelClick(BtnCancel);
 end;
+
+const
+  SQLCompletionVisibleLines = 12;
+  SQLCompletionRowGap = 6;
 
 var
   GExportProgressHelper: TExportProgressHelper;
@@ -696,6 +710,16 @@ begin
   
   UpdateDatabaseMenuState;
   UpdateStatusBar('Ready');
+  SynSQLCompletion.Editor := memSQL;
+  SynSQLCompletion.Font.Assign(memSQL.Font);
+  SynSQLCompletion.TimerInterval := 50;
+  SynSQLCompletion.EndOfTokenChr := '()[] ';
+  SynSQLCompletion.NbLinesInWindow := SQLCompletionVisibleLines;
+  SynSQLCompletion.Resizeable := False;
+  SynSQLCompletion.ItemHeight := GetSQLCompletionLineHeight;
+  Timer1.Enabled := False;
+  Timer1.Interval := 15;
+  Timer1.OnTimer := SQLCompletionFixTimer;
 end;
 procedure TfrmMain.FormDestroy(Sender: TObject);
 begin
@@ -3099,6 +3123,138 @@ begin
     Key := #0;
     btnRunQueryClick(Sender);
   end;
+end;
+
+procedure TfrmMain.SynSQLCompletionExecute(Kind: SynCompletionType; Sender: TObject;
+  var CurrentInput: UnicodeString; var x, y: Integer; var CanExecute: Boolean);
+var
+  Proposal: TSynCompletionProposal;
+  TableOrAlias, SchemaHint, Filter, SchemaPrefix: string;
+  TableRef: TSQLTableRef;
+  Items: TArray<string>;
+  I: Integer;
+begin
+  Proposal := Sender as TSynCompletionProposal;
+  Proposal.ItemList.Clear;
+  Proposal.InsertList.Clear;
+
+  if not FDB.IsOpen then
+  begin
+    CanExecute := False;
+    Exit;
+  end;
+
+  if SQLIsActiveColumnCompletionContext(memSQL.LineText, memSQL.CaretX) then
+  begin
+    if not SQLGetTableRefBeforeCaret(memSQL.LineText, memSQL.CaretX, TableOrAlias, SchemaHint) then
+    begin
+      CanExecute := False;
+      Exit;
+    end;
+
+    TableRef := SQLResolveTableRef(memSQL.Text, TableOrAlias, SchemaHint, FDB);
+    if not TableRef.Found then
+    begin
+      CanExecute := False;
+      Exit;
+    end;
+
+    Items := SQLGetColumnNames(FDB, TableRef);
+    if Length(Items) = 0 then
+    begin
+      CanExecute := False;
+      Exit;
+    end;
+
+    for I := 0 to High(Items) do
+    begin
+      Proposal.ItemList.Add(Items[I]);
+      Proposal.InsertList.Add(Items[I]);
+    end;
+
+    Proposal.CompletionStart := SQLFindLastDotBeforeCaret(memSQL.LineText, memSQL.CaretX) + 1;
+    CurrentInput := SQLGetColumnFilterAfterDot(memSQL.LineText, memSQL.CaretX);
+    CanExecute := True;
+    ScheduleSQLCompletionFixSize;
+    Exit;
+  end;
+
+  if SQLGetTableListContext(memSQL.LineText, memSQL.CaretX, Filter, SchemaPrefix) then
+  begin
+    Items := SQLGetDatabaseObjectNames(FDB, SchemaPrefix);
+    if Length(Items) = 0 then
+    begin
+      CanExecute := False;
+      Exit;
+    end;
+
+    for I := 0 to High(Items) do
+    begin
+      Proposal.ItemList.Add(Items[I]);
+      Proposal.InsertList.Add(Items[I]);
+    end;
+
+    Proposal.CompletionStart := SQLGetTableListFilterStart(memSQL.LineText, memSQL.CaretX);
+    CurrentInput := Filter;
+    CanExecute := True;
+    ScheduleSQLCompletionFixSize;
+    Exit;
+  end;
+
+  CanExecute := False;
+end;
+
+function TfrmMain.GetSQLCompletionLineHeight: Integer;
+begin
+  SynSQLCompletion.Form.Canvas.Font := SynSQLCompletion.Font;
+  Result := SynSQLCompletion.Form.Canvas.TextHeight('Ag') + SQLCompletionRowGap;
+  if Result < 16 then
+    Result := 16;
+end;
+
+procedure TfrmMain.ApplySQLCompletionFormSize;
+var
+  LineH, TotalH: Integer;
+begin
+  if not SynSQLCompletion.Form.Visible then
+    Exit;
+
+  LineH := GetSQLCompletionLineHeight;
+  SynSQLCompletion.ItemHeight := LineH;
+  TotalH := LineH * SQLCompletionVisibleLines;
+  SynSQLCompletion.NbLinesInWindow := SQLCompletionVisibleLines;
+
+  with SynSQLCompletion.Form do
+  begin
+    ClientHeight := TotalH;
+    Height := TotalH;
+    Invalidate;
+  end;
+end;
+
+procedure TfrmMain.ScheduleSQLCompletionFixSize;
+begin
+  Timer1.Enabled := False;
+  ApplySQLCompletionFormSize;
+  Timer1.Enabled := True;
+end;
+
+procedure TfrmMain.SQLCompletionFixTimer(Sender: TObject);
+begin
+  Timer1.Enabled := False;
+  ApplySQLCompletionFormSize;
+end;
+
+procedure TfrmMain.SynSQLCompletionShow(Sender: TObject);
+begin
+  ScheduleSQLCompletionFixSize;
+end;
+
+procedure TfrmMain.SynSQLCompletionClose(Sender: TObject);
+begin
+  SynSQLCompletion.NbLinesInWindow := SQLCompletionVisibleLines;
+  SynSQLCompletion.ItemList.Clear;
+  SynSQLCompletion.InsertList.Clear;
 end;
 
 procedure TfrmMain.mnuAboutClick(Sender: TObject);

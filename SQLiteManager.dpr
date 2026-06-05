@@ -30,7 +30,8 @@ uses
   AboutForm in 'AboutForm.pas' {frmAbout},
   SQLDialogForm in 'SQLDialogForm.pas' {frmSQLDialog},
   RowEditForm in 'RowEditForm.pas' {frmRowEdit},
-  SearchForm in 'SearchForm.pas' {frmSearch};
+  SearchForm in 'SearchForm.pas' {frmSearch},
+  SQLFieldCompletion in 'SQLFieldCompletion.pas';
 {$R *.res}
 begin
   Application.Initialize;

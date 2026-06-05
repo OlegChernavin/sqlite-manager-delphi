@@ -1975,6 +1975,21 @@ object frmMain: TfrmMain
     Left = 467
     Top = 141
   end
+  object SynSQLCompletion: TSynCompletionProposal
+    Editor = memSQL
+    EndOfTokenChr = '()[] '
+    ItemHeight = 0
+    NbLinesInWindow = 12
+    Resizeable = False
+    Options = [scoLimitToMatchedText, scoEndCharCompletion, scoCompleteWithTab, scoCompleteWithEnter, scoUseBuiltInTimer]
+    TimerInterval = 50
+    TriggerChars = '. '
+    OnClose = SynSQLCompletionClose
+    OnExecute = SynSQLCompletionExecute
+    OnShow = SynSQLCompletionShow
+    Left = 536
+    Top = 141
+  end
   object Timer1: TTimer
     Enabled = False
     Interval = 100
