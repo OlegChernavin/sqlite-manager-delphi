@@ -4,7 +4,7 @@ uses
   Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes,
   Vcl.Graphics, Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.Menus, Vcl.StdCtrls,
   Vcl.Buttons, Vcl.ExtCtrls, Vcl.ComCtrls, Vcl.Grids, Vcl.ValEdit, Vcl.ImgList,
-  System.ImageList, Vcl.BaseImageCollection, Vcl.ImageCollection, System.UITypes,
+  System.ImageList, Vcl.BaseImageCollection, Vcl.ImageCollection, System.UITypes, System.Math,
   DBModule, ImportExport, Vcl.VirtualImageList, System.IniFiles, System.Generics.Collections,
   System.Generics.Defaults, SQLite3, Vcl.ToolWin, Win.Registry, Clipbrd, SynEdit,
   SynEditHighlighter, SynHighlighterSQL, SynCompletionProposal, SearchForm, AIService,
@@ -139,6 +139,7 @@ type
     btnEditRecord: TButton;
     btnDeleteRecord: TButton;
     btnAddRecord: TButton;
+    btnDuplicateRecord: TButton;
     edtBrowseTitle: TEdit;
     cbHistory: TComboBox;
     SynSQLSyn1: TSynSQLSyn;
@@ -147,6 +148,7 @@ type
     btnSearchTable: TButton;
     Splitter1: TSplitter;
     DatabaseInformation1: TMenuItem;
+    pmRecentDb: TPopupMenu;
     pmSQL: TPopupMenu;
     mnuAIFont: TMenuItem;
     N14: TMenuItem;
@@ -260,6 +262,7 @@ type
     procedure btnEditRecordClick(Sender: TObject);
     procedure btnDeleteRecordClick(Sender: TObject);
     procedure btnAddRecordClick(Sender: TObject);
+    procedure btnDuplicateRecordClick(Sender: TObject);
     procedure btnNavFirstClick(Sender: TObject);
     procedure btnNavPrevClick(Sender: TObject);
     procedure btnNavNextClick(Sender: TObject);
@@ -272,6 +275,7 @@ type
     procedure FormClose(Sender: TObject; var Action: TCloseAction);
     procedure sgBrowseMouseWheelDown(Sender: TObject; Shift: TShiftState; MousePos: TPoint; var Handled: Boolean);
     procedure sgBrowseMouseWheelUp(Sender: TObject; Shift: TShiftState; MousePos: TPoint; var Handled: Boolean);
+    procedure sgBrowseTopLeftChanged(Sender: TObject);
     procedure sgBrowseDrawCell(Sender: TObject; ACol, ARow: Integer; Rect: TRect; State: TGridDrawState);
     procedure FormShow(Sender: TObject);
     procedure FormActivate(Sender: TObject);
@@ -287,6 +291,7 @@ type
     procedure btnEmptyTableClick(Sender: TObject);
     procedure btnFormatQueryClick(Sender: TObject);
     procedure sgExecuteMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+    procedure sgExecuteSelectCell(Sender: TObject; ACol, ARow: Integer; var CanSelect: Boolean);
     procedure mnuSQLiteHomeClick(Sender: TObject);
     procedure mnuSQLiteSyntaxClick(Sender: TObject);
   private
@@ -303,6 +308,12 @@ type
     FExecuteCellsBackup: TArray<TArray<string>>; // original data rows for sgExecute (cancel sort)
     FBrowseSortCol: Integer;
     FBrowseSortAsc: Boolean;
+    FBrowseSelectedRows: TList<Integer>;
+    FExecuteSelectedRows: TList<Integer>;
+    FBrowseAnchorRow: Integer;
+    FExecuteAnchorRow: Integer;
+    FBrowseLeftCol: Integer; // saved horizontal scroll within current table
+    FBrowseLeftColUpdating: Boolean;
     FRecentQueries: TStringList; // Last 10 SQL queries for current database
     FCurrentDatabaseName: string; // Current database filename (without path)
     TableInfo: TArray<TColumnDef>;
@@ -397,6 +408,17 @@ type
     procedure ApplySQLCompletionFormSize;
     procedure ScheduleSQLCompletionFixSize;
     procedure SQLCompletionFixTimer(Sender: TObject);
+    function GetGridSelectedRows(AGrid: TStringGrid): TList<Integer>;
+    function GetGridAnchorRow(AGrid: TStringGrid): Integer;
+    procedure SetGridAnchorRow(AGrid: TStringGrid; ARow: Integer);
+    procedure ClearGridSelection(AGrid: TStringGrid);
+    function IsGridRowSelected(AGrid: TStringGrid; ARow: Integer): Boolean;
+    procedure HandleGridRowClick(AGrid: TStringGrid; ARow: Integer; Shift: TShiftState);
+    procedure SyncGridSelectionRect(AGrid: TStringGrid);
+    procedure SelectGridDefaultRow(AGrid: TStringGrid);
+    procedure UpdateBrowseSelectionButtons;
+    procedure ApplyBrowseHorzScroll(ACol: Integer; AUpdateSaved: Boolean);
+    procedure ResetBrowseHorzScroll;
   public
     FDB: TSQLiteHandler;
     FCurrentTable: string;
@@ -692,6 +714,13 @@ begin
   FExecuteSortAsc := True;
   FBrowseSortCol := -1;
   FBrowseSortAsc := True;
+  FBrowseSelectedRows := TList<Integer>.Create;
+  FExecuteSelectedRows := TList<Integer>.Create;
+  FBrowseAnchorRow := -1;
+  FExecuteAnchorRow := -1;
+  FBrowseLeftCol := 0;
+  FBrowseLeftColUpdating := False;
+  sgBrowse.OnTopLeftChanged := sgBrowseTopLeftChanged;
   // Initialize UI
   edtLimit.Text := '100';
   edtOffset.Text := '0';
@@ -737,6 +766,8 @@ begin
     SaveLastDatabase(FDB.DatabasePath);
   SaveWindowPosition;
   SaveOptions;
+  FBrowseSelectedRows.Free;
+  FExecuteSelectedRows.Free;
   FRecentDatabases.Free;
   FRecentQueries.Free;
   FDetachMenuAliases.Free;
@@ -795,8 +826,9 @@ begin
     // Save queries for current database before closing
     SaveRecentQueries;
     FDB.CloseDatabase;
+    ResetBrowseHorzScroll;
   end;
-  
+
   if FDB.OpenDatabase(APath) then
   begin
     // Store database name (without path) for query history
@@ -838,6 +870,7 @@ begin
     sgBrowse.Cells[0, 0] := 'No data';
     FBrowseSortCol := -1;
     FBrowseSortAsc := True;
+    ResetBrowseHorzScroll;
     UpdateStatusBar('DB closed');
   end;
 end;
@@ -901,6 +934,7 @@ begin
     Node.Data := Pointer(4);
   end;
   AParent.Expand(True);
+  IndexesNode.Collapse(False);
 end;
 
 function AttachedAliasFromNodeText(const AText: string): string;
@@ -1138,7 +1172,10 @@ begin
     FExecuteSortCol := -1;
     FExecuteSortAsc := True;
     SetLength(FExecuteCellsBackup, 0);
+    ClearGridSelection(sgExecute);
   end;
+  if AGrid = sgBrowse then
+    ClearGridSelection(sgBrowse);
   if not AResult.Success then
   begin
     AGrid.RowCount := 2;
@@ -1188,8 +1225,8 @@ begin
   // Ensure fixed row is never selected
   if AGrid.RowCount > 1 then
   begin
-    AGrid.Row := 1;
     AGrid.FixedRows := 1;
+    SelectGridDefaultRow(AGrid);
   end;
   // Store column types for cell coloring
   if AGrid = sgExecute then
@@ -1375,6 +1412,203 @@ begin
       [BrowseTableSqlRef, BrowseOrderByClause, RowOffset]);
 end;
 
+function TfrmMain.GetGridSelectedRows(AGrid: TStringGrid): TList<Integer>;
+begin
+  if AGrid = sgBrowse then
+    Result := FBrowseSelectedRows
+  else if AGrid = sgExecute then
+    Result := FExecuteSelectedRows
+  else
+    Result := nil;
+end;
+
+function TfrmMain.GetGridAnchorRow(AGrid: TStringGrid): Integer;
+begin
+  if AGrid = sgBrowse then
+    Result := FBrowseAnchorRow
+  else if AGrid = sgExecute then
+    Result := FExecuteAnchorRow
+  else
+    Result := -1;
+end;
+
+procedure TfrmMain.SetGridAnchorRow(AGrid: TStringGrid; ARow: Integer);
+begin
+  if AGrid = sgBrowse then
+    FBrowseAnchorRow := ARow
+  else if AGrid = sgExecute then
+    FExecuteAnchorRow := ARow;
+end;
+
+procedure TfrmMain.ClearGridSelection(AGrid: TStringGrid);
+var
+  List: TList<Integer>;
+begin
+  List := GetGridSelectedRows(AGrid);
+  if List <> nil then
+    List.Clear;
+  SetGridAnchorRow(AGrid, -1);
+end;
+
+function TfrmMain.IsGridRowSelected(AGrid: TStringGrid; ARow: Integer): Boolean;
+var
+  List: TList<Integer>;
+begin
+  List := GetGridSelectedRows(AGrid);
+  Result := (List <> nil) and (List.IndexOf(ARow) >= 0);
+end;
+
+procedure TfrmMain.SyncGridSelectionRect(AGrid: TStringGrid);
+var
+  List: TList<Integer>;
+  Sel: TGridRect;
+begin
+  List := GetGridSelectedRows(AGrid);
+  if (List = nil) or (List.Count = 0) then
+    Exit;
+  Sel.Left := AGrid.FixedCols;
+  // sgBrowse: row highlight is drawn in DrawCell; narrow rect avoids horz auto-scroll.
+  if AGrid = sgBrowse then
+    Sel.Right := AGrid.FixedCols
+  else
+    Sel.Right := AGrid.ColCount - 1;
+  Sel.Top := List.First;
+  Sel.Bottom := List.Last;
+  AGrid.Selection := Sel;
+end;
+
+procedure TfrmMain.SelectGridDefaultRow(AGrid: TStringGrid);
+var
+  List: TList<Integer>;
+  SavedLeft: Integer;
+begin
+  ClearGridSelection(AGrid);
+  if AGrid.RowCount <= AGrid.FixedRows then
+    Exit;
+  List := GetGridSelectedRows(AGrid);
+  List.Add(AGrid.FixedRows);
+  SetGridAnchorRow(AGrid, AGrid.FixedRows);
+  if AGrid = sgBrowse then
+    SavedLeft := FBrowseLeftCol
+  else
+    SavedLeft := AGrid.FixedCols;
+  if AGrid = sgBrowse then
+    FBrowseLeftColUpdating := True;
+  try
+    AGrid.Row := AGrid.FixedRows;
+    SyncGridSelectionRect(AGrid);
+    if AGrid = sgBrowse then
+      ApplyBrowseHorzScroll(SavedLeft, False);
+  finally
+    if AGrid = sgBrowse then
+      FBrowseLeftColUpdating := False
+    else
+      AGrid.LeftCol := AGrid.FixedCols;
+  end;
+end;
+
+procedure TfrmMain.ApplyBrowseHorzScroll(ACol: Integer; AUpdateSaved: Boolean);
+begin
+  if ACol < sgBrowse.FixedCols then
+    ACol := sgBrowse.FixedCols;
+  if AUpdateSaved then
+    FBrowseLeftCol := ACol;
+  if not sgBrowse.HandleAllocated then
+    Exit;
+  FBrowseLeftColUpdating := True;
+  try
+    sgBrowse.LeftCol := ACol;
+  finally
+    FBrowseLeftColUpdating := False;
+  end;
+end;
+
+procedure TfrmMain.ResetBrowseHorzScroll;
+begin
+  ApplyBrowseHorzScroll(sgBrowse.FixedCols, True);
+end;
+
+procedure TfrmMain.sgBrowseTopLeftChanged(Sender: TObject);
+var
+  NewLeft: Integer;
+begin
+  if FBrowseLeftColUpdating then
+    Exit;
+  NewLeft := sgBrowse.LeftCol;
+  if NewLeft <> FBrowseLeftCol then
+    FBrowseLeftCol := NewLeft;
+end;
+
+procedure TfrmMain.HandleGridRowClick(AGrid: TStringGrid; ARow: Integer; Shift: TShiftState);
+var
+  List: TList<Integer>;
+  I, Lo, Hi, Idx, Anchor: Integer;
+  SavedLeft: Integer;
+begin
+  if ARow < AGrid.FixedRows then
+    Exit;
+  List := GetGridSelectedRows(AGrid);
+  if List = nil then
+    Exit;
+  if AGrid = sgBrowse then
+    SavedLeft := FBrowseLeftCol
+  else
+    SavedLeft := AGrid.LeftCol;
+  Anchor := GetGridAnchorRow(AGrid);
+  if ssCtrl in Shift then
+  begin
+    Idx := List.IndexOf(ARow);
+    if Idx >= 0 then
+      List.Delete(Idx)
+    else
+      List.Add(ARow);
+    SetGridAnchorRow(AGrid, ARow);
+  end
+  else if ssShift in Shift then
+  begin
+    if Anchor < AGrid.FixedRows then
+      Anchor := ARow;
+    Lo := Min(Anchor, ARow);
+    Hi := Max(Anchor, ARow);
+    List.Clear;
+    for I := Lo to Hi do
+      List.Add(I);
+  end
+  else
+  begin
+    List.Clear;
+    List.Add(ARow);
+    SetGridAnchorRow(AGrid, ARow);
+  end;
+  List.Sort;
+  if AGrid = sgBrowse then
+    FBrowseLeftColUpdating := True;
+  try
+    AGrid.Row := ARow;
+    SyncGridSelectionRect(AGrid);
+    if AGrid = sgBrowse then
+      ApplyBrowseHorzScroll(SavedLeft, False);
+  finally
+    if AGrid = sgBrowse then
+      FBrowseLeftColUpdating := False
+    else
+      AGrid.LeftCol := SavedLeft;
+  end;
+  AGrid.Invalidate;
+  if AGrid = sgBrowse then
+    UpdateBrowseSelectionButtons;
+end;
+
+procedure TfrmMain.UpdateBrowseSelectionButtons;
+var
+  SelectedCount: Integer;
+begin
+  SelectedCount := FBrowseSelectedRows.Count;
+  btnEditRecord.Enabled := (SelectedCount = 1);
+  btnDuplicateRecord.Enabled := (SelectedCount = 1);
+  btnDeleteRecord.Enabled := (SelectedCount > 0);
+end;
+
 procedure TfrmMain.sgBrowseMouseDown(Sender: TObject; Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer);
 var
@@ -1382,16 +1616,19 @@ var
 begin
   if Button <> mbLeft then
     Exit;
-  if (FCurrentTable = '') and (FCurrentView = '') then
-    Exit;
-  if Length(TableInfo) = 0 then
-    Exit;
   sgBrowse.MouseToCell(X, Y, ACol, ARow);
   if (ACol < 0) or (ARow < 0) then
     Exit;
   if sgBrowse.FixedRows < 1 then
     Exit;
   if ARow >= sgBrowse.FixedRows then
+  begin
+    HandleGridRowClick(sgBrowse, ARow, Shift);
+    Exit;
+  end;
+  if (FCurrentTable = '') and (FCurrentView = '') then
+    Exit;
+  if Length(TableInfo) = 0 then
     Exit;
   if sgBrowse.RowCount <= sgBrowse.FixedRows then
     Exit;
@@ -1437,7 +1674,10 @@ begin
   if sgExecute.FixedRows < 1 then
     Exit;
   if ARow >= sgExecute.FixedRows then
+  begin
+    HandleGridRowClick(sgExecute, ARow, Shift);
     Exit;
+  end;
   if sgExecute.RowCount <= sgExecute.FixedRows then
     Exit;
 
@@ -1484,10 +1724,10 @@ var
   I: Integer;
   Item: TMenuItem;
 begin
-  // Clear existing
   while mnuRecent.Count > 0 do
     mnuRecent.Delete(0);
-  // Add items
+  while pmRecentDb.Items.Count > 0 do
+    pmRecentDb.Items.Delete(0);
   for I := 0 to FRecentDatabases.Count - 1 do
   begin
     Item := TMenuItem.Create(mnuRecent);
@@ -1495,6 +1735,12 @@ begin
     Item.Tag := I;
     Item.OnClick := OnRecentClick;
     mnuRecent.Add(Item);
+
+    Item := TMenuItem.Create(pmRecentDb);
+    Item.Caption := FRecentDatabases[I];
+    Item.Tag := I;
+    Item.OnClick := OnRecentClick;
+    pmRecentDb.Items.Add(Item);
   end;
 end;
 procedure TfrmMain.OnRecentClick(Sender: TObject);
@@ -3294,6 +3540,7 @@ begin
       edtBrowseTitle.Text := BrowseObjectCaption;
       // Reset offset when switching tables
       edtOffset.Text := '0';
+      ResetBrowseHorzScroll;
       SaveLastSelectedTable(FCurrentTable);
       LoadTableData;
       // Load table details on tsTable tab
@@ -3301,6 +3548,7 @@ begin
       // Show tsBrowse and tsExecute tabs
       pcMain.ActivePageIndex := 0;
       sgBrowse.SetFocus;
+      ResetBrowseHorzScroll;
       tsIndex.TabVisible := False;
       UpdateTableMenuState;
       UpdateViewMenuState;
@@ -3325,11 +3573,13 @@ begin
       edtBrowseTitle.Text := BrowseObjectCaption;
       // Reset offset when switching views
       edtOffset.Text := '0';
+      ResetBrowseHorzScroll;
       SaveLastSelectedTable(FCurrentView);
       LoadTableData;
       // Show tsBrowse and tsExecute tabs
       pcMain.ActivePageIndex := 0;
       sgBrowse.SetFocus;
+      ResetBrowseHorzScroll;
       tsIndex.TabVisible := False;
       UpdateTableMenuState;
       UpdateViewMenuState;
@@ -3385,20 +3635,20 @@ begin
   LoadTableData;
 end;
 procedure TfrmMain.sgBrowseSelectCell(Sender: TObject; ACol, ARow: Integer; var CanSelect: Boolean);
-var
-  SelectedCount: Integer;
 begin
-  // Count selected rows using Selection rectangle
-  // Selection.Top and Selection.Bottom give the range of selected rows
-  SelectedCount := sgBrowse.Selection.Bottom - sgBrowse.Selection.Top + 1;
-  // Ensure we have valid selection (not including header row)
-  if sgBrowse.Selection.Top < 1 then
-    SelectedCount := 0;
-  // Enable/disable Edit button based on selection
-  // Edit works only with exactly one selected row
-  btnEditRecord.Enabled := (SelectedCount = 1);
-  // Delete works with one or more selected rows
-  btnDeleteRecord.Enabled := (SelectedCount > 0);
+  if ARow >= sgBrowse.FixedRows then
+    CanSelect := False
+  else
+    CanSelect := True;
+  UpdateBrowseSelectionButtons;
+end;
+
+procedure TfrmMain.sgExecuteSelectCell(Sender: TObject; ACol, ARow: Integer; var CanSelect: Boolean);
+begin
+  if ARow >= sgExecute.FixedRows then
+    CanSelect := False
+  else
+    CanSelect := True;
 end;
 procedure TfrmMain.SplitSQLStatements(const ASQL: string; out AStatements: TArray<string>);
 var
@@ -3643,7 +3893,6 @@ var
   RowIds: TStringList;
   SQL: string;
   QueryResult: TQueryResult;
-  SelTop, SelBottom: Integer;
 begin
   if not FDB.IsOpen then
   begin
@@ -3655,22 +3904,16 @@ begin
     ShowMessage('Please select a table or view first');
     Exit;
   end;
-  // Get selection range
-  SelTop := sgBrowse.Selection.Top;
-  SelBottom := sgBrowse.Selection.Bottom;
-  
-  // Check if any rows are selected
-  if (SelTop < 1) or (SelBottom < SelTop) then
+  if FBrowseSelectedRows.Count = 0 then
   begin
     ShowMessage('Please select at least one row to delete');
     Exit;
   end;
   RowIds := TStringList.Create;
   try
-    // Get rowids for all selected rows
-    for I := SelTop to SelBottom do
+    for I := 0 to FBrowseSelectedRows.Count - 1 do
     begin
-      SQL := BrowseRowIdSql(I);
+      SQL := BrowseRowIdSql(FBrowseSelectedRows[I]);
       QueryResult := FDB.ExecuteSQL(SQL);
       if QueryResult.Success and (QueryResult.RowCount > 0) then
         RowIds.Add(VarToStr(QueryResult.Rows[0][0]));
@@ -3735,6 +3978,47 @@ begin
       LoadTableData;
       //ShowMessage('Record added successfully');
     end;
+  finally
+    Frm.Free;
+  end;
+end;
+
+procedure TfrmMain.btnDuplicateRecordClick(Sender: TObject);
+var
+  SelectedRow: Integer;
+  RowId: string;
+  Frm: TfrmRowEdit;
+  Columns: TArray<TColumnDef>;
+  QueryResult: TQueryResult;
+  SQL: string;
+begin
+  if not FDB.IsOpen then
+  begin
+    ShowMessage('No database connected');
+    Exit;
+  end;
+  if (FCurrentTable = '') and (FCurrentView = '') then
+  begin
+    ShowMessage('Please select a table or view first');
+    Exit;
+  end;
+  SelectedRow := sgBrowse.Row;
+  if SelectedRow < 1 then
+  begin
+    ShowMessage('Please select a row to duplicate');
+    Exit;
+  end;
+  SQL := BrowseRowIdSql(SelectedRow);
+  QueryResult := FDB.ExecuteSQL(SQL);
+  if QueryResult.Success and (QueryResult.RowCount > 0) then
+    RowId := VarToStr(QueryResult.Rows[0][0])
+  else
+    RowId := IntToStr(SelectedRow);
+  Columns := TableInfo;
+  Frm := TfrmRowEdit.CreateEdit(Self, FDB, BrowseTableSqlRef, Columns, RowId, True, True);
+  try
+    if Frm.ShowModal = mrOk then
+      LoadTableData;
   finally
     Frm.Free;
   end;
@@ -4191,8 +4475,7 @@ begin
   // Get cell text to check for NULL
   CellText := Grid.Cells[ACol, ARow];
   // Check if this cell is selected
-  IsSelected := (ARow >= Grid.Selection.Top) and (ARow <= Grid.Selection.Bottom) and
-                (ACol >= Grid.Selection.Left) and (ACol <= Grid.Selection.Right);
+  IsSelected := IsGridRowSelected(Grid, ARow);
   // NULL cells — always red, regardless of column type
   if CellText = '<NULL>' then
   begin
@@ -4499,28 +4782,36 @@ begin
   end;
 end;
 procedure TfrmMain.sgBrowseMouseWheelUp(Sender: TObject; Shift: TShiftState; MousePos: TPoint; var Handled: Boolean);
+var
+  G: TStringGrid;
+  SavedLeft: Integer;
 begin
   Handled := True;
-  var G := Sender as TStringGrid;
-  var SavedLeft := G.LeftCol;
+  G := Sender as TStringGrid;
+  SavedLeft := FBrowseLeftCol;
+  FBrowseLeftColUpdating := True;
   try
     if G.TopRow >= 3 then
       G.TopRow := G.TopRow - 3;
+    ApplyBrowseHorzScroll(SavedLeft, False);
   finally
-    // Keep horizontal scroll position when vertical scroll changes.
-    G.LeftCol := SavedLeft;
+    FBrowseLeftColUpdating := False;
   end;
 end;
 procedure TfrmMain.sgBrowseMouseWheelDown(Sender: TObject; Shift: TShiftState; MousePos: TPoint; var Handled: Boolean);
+var
+  G: TStringGrid;
+  SavedLeft: Integer;
 begin
   Handled := True;
-  var G := Sender as TStringGrid;
-  var SavedLeft := G.LeftCol;
+  G := Sender as TStringGrid;
+  SavedLeft := FBrowseLeftCol;
+  FBrowseLeftColUpdating := True;
   try
     G.TopRow := G.TopRow + 3;
+    ApplyBrowseHorzScroll(SavedLeft, False);
   finally
-    // Keep horizontal scroll position when vertical scroll changes.
-    G.LeftCol := SavedLeft;
+    FBrowseLeftColUpdating := False;
   end;
 end;
 procedure TfrmMain.SaveRecentQueries;
@@ -4648,7 +4939,8 @@ end;
 procedure TfrmMain.miCopyRowsCSVClick(Sender: TObject);
 var
   SL: TStringList;
-  I, J, SelTop, SelBottom: Integer;
+  SelectedRows: TList<Integer>;
+  I, J, RowIdx: Integer;
   CellValue: string;
   S: String;
 begin
@@ -4657,24 +4949,21 @@ begin
     ShowMessage('Please select at least one row');
     Exit;
   end;
-  
+  SelectedRows := GetGridSelectedRows(CurrentGrid);
+  if (SelectedRows = nil) or (SelectedRows.Count = 0) then
+  begin
+    ShowMessage('Please select at least one row');
+    Exit;
+  end;
   SL := TStringList.Create;
   try
-    // Get selection range
-    SelTop := CurrentGrid.Selection.Top;
-    SelBottom := CurrentGrid.Selection.Bottom;
-    if (SelTop < 1) or (SelBottom < SelTop) then
+    for I := 0 to SelectedRows.Count - 1 do
     begin
-      ShowMessage('Please select at least one row');
-      Exit;
-    end;
-    // Build CSV
-    for I := SelTop to SelBottom do
-    begin
+      RowIdx := SelectedRows[I];
       S := '';
       for J := 0 to CurrentGrid.ColCount - 1 do
       begin
-        CellValue := CurrentGrid.Cells[J, I];
+        CellValue := CurrentGrid.Cells[J, RowIdx];
         // Escape quotes and wrap in quotes if contains comma
         if (Pos(',', CellValue) > 0) or (Pos('"', CellValue) > 0) then
           CellValue := '"' + StringReplace(CellValue, '"', '""', [rfReplaceAll]) + '"';
@@ -4694,27 +4983,31 @@ end;
 procedure TfrmMain.miCopyRowsCSVExcelClick(Sender: TObject);
 var
   SL: TStringList;
-  I, J, SelTop, SelBottom: Integer;
+  SelectedRows: TList<Integer>;
+  I, J, RowIdx: Integer;
   CellValue: string;
   S: String;
 begin
+  if CurrentGrid = nil then
+  begin
+    ShowMessage('Please select at least one row');
+    Exit;
+  end;
+  SelectedRows := GetGridSelectedRows(CurrentGrid);
+  if (SelectedRows = nil) or (SelectedRows.Count = 0) then
+  begin
+    ShowMessage('Please select at least one row');
+    Exit;
+  end;
   SL := TStringList.Create;
   try
-    // Get selection range
-    SelTop := CurrentGrid.Selection.Top;
-    SelBottom := CurrentGrid.Selection.Bottom;
-    if (SelTop < 1) or (SelBottom < SelTop) then
+    for I := 0 to SelectedRows.Count - 1 do
     begin
-      ShowMessage('Please select at least one row');
-      Exit;
-    end;
-    // Build CSV with tab delimiter (Excel-compatible)
-    for I := SelTop to SelBottom do
-    begin
+      RowIdx := SelectedRows[I];
       S := '';
       for J := 0 to CurrentGrid.ColCount - 1 do
       begin
-        CellValue := CurrentGrid.Cells[J, I];
+        CellValue := CurrentGrid.Cells[J, RowIdx];
         // Escape quotes and wrap in quotes if contains tab or quote
         if (Pos(#9, CellValue) > 0) or (Pos('"', CellValue) > 0) then
           CellValue := '"' + StringReplace(CellValue, '"', '""', [rfReplaceAll]) + '"';
@@ -4736,36 +5029,46 @@ end;
 procedure TfrmMain.miCopyRowsSQLClick(Sender: TObject);
 var
   SL: TStringList;
-  I, J, SelTop, SelBottom: Integer;
+  SelectedRows: TList<Integer>;
+  ColTypes: TArray<TSQLiteColumnType>;
+  I, J, RowIdx: Integer;
   CellValue: string;
   TableName: string;
   S: String;
 begin
+  if CurrentGrid = nil then
+  begin
+    ShowMessage('Please select at least one row');
+    Exit;
+  end;
+  SelectedRows := GetGridSelectedRows(CurrentGrid);
+  if (SelectedRows = nil) or (SelectedRows.Count = 0) then
+  begin
+    ShowMessage('Please select at least one row');
+    Exit;
+  end;
+  if CurrentGrid = sgBrowse then
+    ColTypes := FColumnTypes
+  else
+    ColTypes := FExecuteColumnTypes;
   SL := TStringList.Create;
   try
-    // Get selection range
-    SelTop := CurrentGrid.Selection.Top;
-    SelBottom := CurrentGrid.Selection.Bottom;
-    if (SelTop < 1) or (SelBottom < SelTop) then
-    begin
-      ShowMessage('Please select at least one row');
-      Exit;
-    end;
     TableName := FCurrentTable;
     if TableName = '' then
       TableName := FCurrentView;
-    // Build INSERT statements
-    for I := SelTop to SelBottom do
+    for I := 0 to SelectedRows.Count - 1 do
     begin
+      RowIdx := SelectedRows[I];
       S := 'INSERT INTO "' + TableName + '" VALUES (';
       for J := 0 to CurrentGrid.ColCount - 1 do
       begin
-        CellValue := CurrentGrid.Cells[J, I];
+        CellValue := CurrentGrid.Cells[J, RowIdx];
         if J > 0 then
           S := S + ', ';
         if (CellValue = 'NULL') or (CellValue = '<NULL>') then
           S := S + 'NULL'
-        else if (FColumnTypes[J] = sctInteger) or (FColumnTypes[J] = sctReal) then
+        else if (J < Length(ColTypes)) and
+          ((ColTypes[J] = sctInteger) or (ColTypes[J] = sctReal)) then
           S := S + CellValue
         else
           S := S + '''' + StringReplace(CellValue, '''', '''''', [rfReplaceAll]) + '''';
@@ -4775,7 +5078,6 @@ begin
     end;
     
     Clipboard.AsText := SL.Text;
-    //ShowMessage('Copied ' + IntToStr(SelBottom - SelTop + 1) + ' row(s) to clipboard as SQL');
   finally
     SL.Free;
   end;

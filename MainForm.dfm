@@ -148,6 +148,16 @@ object frmMain: TfrmMain
             TabOrder = 2
             OnClick = btnAddRecordClick
           end
+          object btnDuplicateRecord: TButton
+            Left = 685
+            Top = 4
+            Width = 75
+            Height = 25
+            Caption = 'Duplicate'
+            Enabled = False
+            TabOrder = 5
+            OnClick = btnDuplicateRecordClick
+          end
           object edtBrowseTitle: TEdit
             Left = 46
             Top = 5
@@ -631,6 +641,7 @@ object frmMain: TfrmMain
           OnMouseDown = sgExecuteMouseDown
           OnMouseWheelDown = sgBrowseMouseWheelDown
           OnMouseWheelUp = sgBrowseMouseWheelUp
+          OnSelectCell = sgExecuteSelectCell
         end
         object pnlExecuteStatus: TPanel
           Left = 0
@@ -814,9 +825,11 @@ object frmMain: TfrmMain
       Top = 0
       Hint = 'Open Database'
       Caption = 'btnOpenDb'
+      DropdownMenu = pmRecentDb
       ImageIndex = 1
       ParentShowHint = False
       ShowHint = True
+      Style = tbsDropDown
       OnClick = mnuOpenDatabaseClick
     end
     object btnImport: TToolButton
@@ -1976,17 +1989,28 @@ object frmMain: TfrmMain
     Top = 141
   end
   object SynSQLCompletion: TSynCompletionProposal
-    Editor = memSQL
-    EndOfTokenChr = '()[] '
-    ItemHeight = 0
+    Options = [scoLimitToMatchedText, scoUseBuiltInTimer, scoEndCharCompletion, scoCompleteWithTab, scoCompleteWithEnter]
     NbLinesInWindow = 12
-    Resizeable = False
-    Options = [scoLimitToMatchedText, scoEndCharCompletion, scoCompleteWithTab, scoCompleteWithEnter, scoUseBuiltInTimer]
-    TimerInterval = 50
+    EndOfTokenChr = '()[] '
     TriggerChars = '. '
+    Font.Charset = DEFAULT_CHARSET
+    Font.Color = clWindowText
+    Font.Height = -11
+    Font.Name = 'MS Sans Serif'
+    Font.Style = []
+    TitleFont.Charset = DEFAULT_CHARSET
+    TitleFont.Color = clBtnText
+    TitleFont.Height = -11
+    TitleFont.Name = 'MS Sans Serif'
+    TitleFont.Style = [fsBold]
+    Columns = <>
+    Resizeable = False
     OnClose = SynSQLCompletionClose
     OnExecute = SynSQLCompletionExecute
     OnShow = SynSQLCompletionShow
+    ShortCut = 16416
+    Editor = memSQL
+    TimerInterval = 50
     Left = 536
     Top = 141
   end
@@ -1995,6 +2019,10 @@ object frmMain: TfrmMain
     Interval = 100
     Left = 787
     Top = 301
+  end
+  object pmRecentDb: TPopupMenu
+    Left = 456
+    Top = 140
   end
   object pmSQL: TPopupMenu
     OnPopup = memSQLPopup
