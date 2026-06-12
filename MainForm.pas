@@ -346,6 +346,7 @@ type
     procedure SaveLastDatabase(const APath: string);
     procedure SaveLastSelectedTable(const ATableName: string);
     procedure LoadLastSelectedTable;
+    function FindNextTableAfter(const AName: string): string;
     procedure SaveRecentQueries;
     procedure LoadRecentQueries;
     procedure AddToRecentQueries(const ASQL: string);
@@ -827,6 +828,19 @@ begin
     SaveRecentQueries;
     FDB.CloseDatabase;
     ResetBrowseHorzScroll;
+    FCurrentTable := '';
+    FCurrentView := '';
+    FCurrentTrigger := '';
+    FCurrentIndex := '';
+    FCurrentTableName := '';
+    FCurrentSchema := '';
+    FIsSearching := False;
+    FSearchWhereClause := '';
+    sgBrowse.RowCount := 2;
+    sgBrowse.ColCount := 1;
+    sgBrowse.Cells[0, 0] := 'No data';
+    FBrowseSortCol := -1;
+    FBrowseSortAsc := True;
   end;
 
   if FDB.OpenDatabase(APath) then
@@ -4748,9 +4762,24 @@ begin
     end;
   end;
 end;
+function TfrmMain.FindNextTableAfter(const AName: string): string;
+var
+  Structure: TDatabaseStructure;
+  I: Integer;
+begin
+  Result := '';
+  Structure := FDB.GetDatabaseStructure;
+  for I := 0 to High(Structure.Tables) do
+    if CompareText(Structure.Tables[I], AName) > 0 then
+      Exit(Structure.Tables[I]);
+  if Length(Structure.Tables) > 0 then
+    Result := Structure.Tables[0];
+end;
+
 procedure TfrmMain.LoadLastSelectedTable;
 var
   LastTable: string;
+  FallbackTable: string;
   I: Integer;
   Node: TTreeNode;
 begin
@@ -4764,6 +4793,7 @@ begin
       begin
         SelectTableInTree(LastTable, '');
         if FCurrentTable = '' then
+        begin
           for I := 0 to tvStructure.Items.Count - 1 do
           begin
             Node := tvStructure.Items[I];
@@ -4775,6 +4805,13 @@ begin
               Break;
             end;
           end;
+          if (FCurrentTable = '') and (FCurrentView = '') then
+          begin
+            FallbackTable := FindNextTableAfter(LastTable);
+            if FallbackTable <> '' then
+              SelectTableInTree(FallbackTable, '');
+          end;
+        end;
       end;
     except
     end;
