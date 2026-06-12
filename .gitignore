@@ -57,6 +57,9 @@ $RECYCLE.BIN/
 *.lnk
 .DS_Store
 
+# Installer output (script installer.iss is tracked)
+installer/*.exe
+
 # Logs and temp
 *.log
 *.tmp

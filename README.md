@@ -100,37 +100,21 @@ msbuild SQLiteManager.dproj /t:Build
   - Map file: **Detailed**
   - Use imported library: **Yes**
 
-## Создание установщика
+## Создание установщика и релиз на GitHub
 
-### Вариант 1: Inno Setup
+Готовый скрипт: [`installer.iss`](installer.iss). Exe после сборки: `Win32\Release\SQLiteManager.exe`.
 
-1. Установите [Inno Setup](https://jrsoftware.org/isdl.php)
-2. Создайте скрипт `setup.iss`:
+```powershell
+# Release + установщик (нужны Delphi, sqlite3.dll x86, Inno Setup 6)
+.\scripts\build-installer.ps1
 
-```iss
-[Setup]
-AppName=SQLite Manager
-AppVersion=1.0.0
-DefaultDirName={autopf}\SQLiteManager
-DefaultGroupName=SQLite Manager
-OutputDir=installer
-OutputBaseFilename=SQLiteManagerSetup
-
-[Files]
-Source: "bin\SQLiteManager.exe"; DestDir: "{app}"
-Source: "sqlite3.dll"; DestDir: "{app}"
-Source: "README.md"; DestDir: "{app}"
-
-[Icons]
-Name: "{group}\SQLite Manager"; Filename: "{app}\SQLiteManager.exe"
-Name: "{autodesktop}\SQLite Manager"; Filename: "{app}\SQLiteManager.exe"
+# Или только установщик, если exe уже собран:
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer.iss
 ```
 
-3. Скомпилируйте: `ISCC.exe setup.iss`
+Установщик: `installer\SQLiteManagerSetup-1.0.0-Win32.exe` — **не коммитить**, выложить в **GitHub Releases**.
 
-### Вариант 2: Advanced Installer
-
-Используйте Advanced Installer для создания MSI установщика.
+Полная инструкция: **[RELEASING.md](RELEASING.md)** (тег `v1.0.0`, `gh release create`, чеклист).
 
 ## Возможности
 
@@ -146,13 +130,12 @@ Name: "{autodesktop}\SQLite Manager"; Filename: "{app}\SQLiteManager.exe"
 ✅ Импорт из CSV, SQL, XML  
 ✅ Настройки приложения  
 ✅ Последние открытые базы  
+✅ Создание представлений  
+✅ Создание триггеров  
+✅ Показ таблиц с другой БД (через ATTACH)   
+✅ История БД неверно работает с пробелом - считает такие пути за раздельные записи
 
-### В разработке
 
-⏳ Создание представлений  
-⏳ Создание триггеров  
-⏳ Показ таблиц с другой БД (через ATTACH)   
-⏳ История БД неверно работает с пробелом - считает такие пути за раздельные записи
 
 
 ## Горячие клавиши
