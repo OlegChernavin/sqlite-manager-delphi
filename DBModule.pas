@@ -80,6 +80,16 @@ type
 
   TBatchTableExportFormat = (btfSQL, btfCSV, btfExcel);
 
+  TBoundValueKind = (bvkNull, bvkInt, bvkReal, bvkText, bvkBlob);
+
+  TBoundColumnValue = record
+    Kind: TBoundValueKind;
+    IntValue: Int64;
+    RealValue: Double;
+    TextValue: string;
+    BlobData: TBytes;
+  end;
+
   TSQLiteHandler = class
   private
     FDB: PSQLite3;
@@ -118,6 +128,8 @@ type
     procedure CloseDatabase;
 
     function ExecuteSQL(const ASQL: string): TQueryResult;
+    function InsertRow(const ATableName: string; const AColumnNames: TArray<string>;
+      const AValues: TArray<TBoundColumnValue>): TQueryResult;
     function ExecuteScalar(const ASQL: string): Variant;
     function GetTableData(const ATableName: string; ALimit: Integer = 100; AOffset: Integer = 0): TQueryResult;
     function GetBlobData(const ATableName: string; ARow: Integer; ACol: Integer): TBytes;
@@ -567,7 +579,7 @@ begin
     Flags := SQLITE_OPEN_READWRITE or SQLITE_OPEN_CREATE;
 
   FDB := nil;
-  Res := sqlite3_open_v2(PAnsiChar(AnsiString(APath)), FDB, Flags, nil);
+  Res := sqlite3_open_v2(PAnsiChar(UTF8Encode(APath)), FDB, Flags, nil);
   
   if Res = SQLITE_OK then
   begin
@@ -712,6 +724,109 @@ begin
     Result.Changes := sqlite3_changes(FDB);
     Result.Success := True;
     
+  finally
+    sqlite3_finalize(Stmt);
+  end;
+end;
+
+function TSQLiteHandler.InsertRow(const ATableName: string;
+  const AColumnNames: TArray<string>; const AValues: TArray<TBoundColumnValue>): TQueryResult;
+var
+  Stmt: PSQLite3Stmt;
+  Res: Integer;
+  SQL, ColList, Placeholders: string;
+  I: Integer;
+  Utf8Texts: TArray<UTF8String>;
+  BlobPtr: Pointer;
+begin
+  Result.Columns := nil;
+  Result.ColumnTypes := nil;
+  Result.Rows := nil;
+  Result.RowCount := 0;
+  Result.Changes := 0;
+  Result.ErrorMessage := '';
+  Result.Success := False;
+
+  if not FIsOpen then
+  begin
+    Result.ErrorMessage := 'Database is not open';
+    Exit;
+  end;
+
+  if Length(AColumnNames) <> Length(AValues) then
+  begin
+    Result.ErrorMessage := 'Column count mismatch';
+    Exit;
+  end;
+
+  if Length(AColumnNames) = 0 then
+  begin
+    Result.Success := True;
+    Exit;
+  end;
+
+  ColList := '';
+  Placeholders := '';
+  for I := 0 to High(AColumnNames) do
+  begin
+    if ColList <> '' then
+    begin
+      ColList := ColList + ', ';
+      Placeholders := Placeholders + ', ';
+    end;
+    ColList := ColList + QuoteIdent(AColumnNames[I]);
+    Placeholders := Placeholders + '?';
+  end;
+
+  SQL := Format('INSERT INTO %s (%s) VALUES (%s)', [ATableName, ColList, Placeholders]);
+
+  Stmt := nil;
+  var pzTail: PAnsiChar := nil;
+  Res := sqlite3_prepare_v2(FDB, PAnsiChar(UTF8Encode(SQL)), -1, Stmt, pzTail);
+  if Res <> SQLITE_OK then
+  begin
+    Result.ErrorMessage := UTF8ToString(sqlite3_errmsg(FDB));
+    Exit;
+  end;
+
+  SetLength(Utf8Texts, Length(AValues));
+  try
+    for I := 0 to High(AValues) do
+    begin
+      case AValues[I].Kind of
+        bvkNull:
+          sqlite3_bind_null(Stmt, I + 1);
+        bvkInt:
+          sqlite3_bind_int64(Stmt, I + 1, AValues[I].IntValue);
+        bvkReal:
+          sqlite3_bind_double(Stmt, I + 1, AValues[I].RealValue);
+        bvkText:
+          begin
+            Utf8Texts[I] := UTF8Encode(AValues[I].TextValue);
+            sqlite3_bind_text(Stmt, I + 1, PAnsiChar(Utf8Texts[I]), Length(Utf8Texts[I]), nil);
+          end;
+        bvkBlob:
+          begin
+            if Length(AValues[I].BlobData) > 0 then
+            begin
+              BlobPtr := @AValues[I].BlobData[0];
+              sqlite3_bind_blob(Stmt, I + 1, BlobPtr, Length(AValues[I].BlobData), nil);
+            end
+            else
+              sqlite3_bind_blob(Stmt, I + 1, nil, 0, nil);
+          end;
+      end;
+    end;
+
+    Res := sqlite3_step(Stmt);
+    if (Res <> SQLITE_DONE) and (Res <> SQLITE_ROW) then
+    begin
+      Result.ErrorMessage := UTF8ToString(sqlite3_errmsg(FDB));
+      Exit;
+    end;
+
+    Result.Changes := sqlite3_changes(FDB);
+    Result.Success := True;
   finally
     sqlite3_finalize(Stmt);
   end;
@@ -2013,7 +2128,7 @@ var
   DestDb: PSQLite3;
   Backup: PSQLite3Backup;
   Res: Integer;
-  PathAnsi: AnsiString;
+  PathUtf8: UTF8String;
 begin
   Result := False;
   FLastError := '';
@@ -2030,8 +2145,8 @@ begin
   end;
 
   DestDb := nil;
-  PathAnsi := AnsiString(ADestPath);
-  Res := sqlite3_open_v2(PAnsiChar(PathAnsi), DestDb,
+  PathUtf8 := UTF8Encode(ADestPath);
+  Res := sqlite3_open_v2(PAnsiChar(PathUtf8), DestDb,
     SQLITE_OPEN_READWRITE or SQLITE_OPEN_CREATE, nil);
   if Res <> SQLITE_OK then
   begin
