@@ -36,6 +36,7 @@ type
     FColumns: TArray<TColumnDef>;
     FFieldData: TArray<TFieldData>;
     FIsInsert: Boolean;
+    FIsDuplicate: Boolean;
     FRowId: string;
     FEditControls: TObjectList<TWinControl>;
     FFieldLabels: TArray<TLabel>;
@@ -58,6 +59,8 @@ type
     procedure BlobViewerFormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure BlobViewerMemoKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     function FieldValueChanged(const AField: TFieldData; const AValue: string): Boolean;
+    function IsExplicitNullText(const AText: string): Boolean;
+    function IsNullFieldText(const AText: string): Boolean;
     function GetControlText(Ctrl: TWinControl): string;
     function GetTypeColor(ColType: TSQLiteColumnType): TColor;
     function GetFieldControlColor(AIndex: Integer; const AText: string): TColor;
@@ -66,10 +69,11 @@ type
     procedure FieldControlChange(Sender: TObject);
     procedure LoadFieldData;
     procedure LoadExistingRecord;
+    function ExecuteDuplicateInsert: Boolean;
   public
     constructor CreateEdit(AOwner: TComponent; ADB: TSQLiteHandler;
       const ATableName: string; const AColumns: TArray<TColumnDef>;
-      const ARowId: string; AIsInsert: Boolean);
+      const ARowId: string; AIsInsert: Boolean; AIsDuplicate: Boolean = False);
     destructor Destroy; override;
   end;
 implementation
@@ -94,7 +98,7 @@ const
 { TfrmRowEdit }
 constructor TfrmRowEdit.CreateEdit(AOwner: TComponent; ADB: TSQLiteHandler;
   const ATableName: string; const AColumns: TArray<TColumnDef>;
-  const ARowId: string; AIsInsert: Boolean);
+  const ARowId: string; AIsInsert: Boolean; AIsDuplicate: Boolean);
 begin
   inherited Create(AOwner);
   FDB := ADB;
@@ -102,8 +106,11 @@ begin
   FColumns := AColumns;
   FRowId := ARowId;
   FIsInsert := AIsInsert;
+  FIsDuplicate := AIsDuplicate;
   FEditControls := TObjectList<TWinControl>.Create;
-  if AIsInsert then
+  if FIsDuplicate then
+    Caption := 'Duplicate Record - ' + ATableName
+  else if AIsInsert then
     Caption := 'Add Record - ' + ATableName
   else
     Caption := 'Edit Record - ' + ATableName;
@@ -114,7 +121,9 @@ end;
 
 function TfrmRowEdit.FormSizeKey: string;
 begin
-  if FIsInsert then
+  if FIsDuplicate then
+    Result := 'Duplicate'
+  else if FIsInsert then
     Result := 'Add'
   else
     Result := 'Edit';
@@ -214,6 +223,16 @@ begin
   end;
 end;
 
+function TfrmRowEdit.IsExplicitNullText(const AText: string): Boolean;
+begin
+  Result := SameText(Trim(AText), 'NULL');
+end;
+
+function TfrmRowEdit.IsNullFieldText(const AText: string): Boolean;
+begin
+  Result := (Trim(AText) = '') or IsExplicitNullText(AText);
+end;
+
 function TfrmRowEdit.GetFieldControlColor(AIndex: Integer; const AText: string): TColor;
 var
   Field: TFieldData;
@@ -225,9 +244,9 @@ begin
   if IsBlobField(Field, AIndex) then
     Exit(clBlobCell);
 
-  if Trim(AText) = '' then
+  if IsNullFieldText(AText) then
   begin
-    if FIsInsert and Field.IsAutoInc then
+    if FIsInsert and Field.IsAutoInc and (Trim(AText) = '') then
       Exit(GetTypeColor(sctInteger));
     Exit(clNullCell);
   end;
@@ -287,9 +306,18 @@ begin
     Field.NewValue := Null;
     FFieldData[I] := Field;
   end;
-  // Load existing record if not insert
-  if not FIsInsert then
+  if (not FIsInsert) or FIsDuplicate then
     LoadExistingRecord;
+
+  if FIsDuplicate then
+  begin
+    for I := 0 to High(FFieldData) do
+      if FFieldData[I].IsAutoInc then
+      begin
+        FFieldData[I].OldValue := Null;
+        FFieldData[I].NewValue := Null;
+      end;
+  end;
   // Create UI controls
   SetLength(FFieldLabels, Length(FFieldData));
   for I := 0 to High(FFieldData) do
@@ -338,8 +366,8 @@ begin
       BlobBtn.Tag := I;
       BlobBtn.Flat := True;
       BlobBtn.Caption := '';
-      BlobBtn.Enabled := not FIsInsert;
-      if FIsInsert then
+      BlobBtn.Enabled := (not FIsInsert) or FIsDuplicate;
+      if FIsInsert and not FIsDuplicate then
         BlobBtn.Hint := 'BLOB view not available for new record'
       else
         BlobBtn.Hint := 'View BLOB';
@@ -348,7 +376,7 @@ begin
       BlobBtn.OnClick := BlobButtonClick;
     end;
     EditCtrl.Left := cFieldLeft;
-    if FIsInsert and FFieldData[I].IsAutoInc then
+    if (FIsInsert or FIsDuplicate) and FFieldData[I].IsAutoInc then
       LabelCtrl.Font.Style := LabelCtrl.Font.Style + [fsItalic];
     FEditControls.Add(EditCtrl);
     UpdateFieldAppearance(I);
@@ -722,9 +750,11 @@ var
   OldStr: string;
 begin
   if VarIsNull(AField.OldValue) or VarIsEmpty(AField.OldValue) then
-    Exit(AValue <> '');
+    Exit((AValue <> '') and not IsExplicitNullText(AValue));
 
   OldStr := VarToStr(AField.OldValue);
+  if IsExplicitNullText(AValue) then
+    Exit(True);
   if Pos('INT', UpperCase(AField.ColType)) > 0 then
     Result := Trim(AValue) <> Trim(OldStr)
   else
@@ -808,6 +838,104 @@ begin
   end;
 end;
 
+function TfrmRowEdit.ExecuteDuplicateInsert: Boolean;
+var
+  I, ColCount: Integer;
+  Value: string;
+  BoundVal: TBoundColumnValue;
+  ColumnNames: TArray<string>;
+  BoundValues: TArray<TBoundColumnValue>;
+  InsertResult: TQueryResult;
+  ColTypeU: string;
+begin
+  Result := False;
+  ColCount := 0;
+  SetLength(ColumnNames, Length(FFieldData));
+  SetLength(BoundValues, Length(FFieldData));
+
+  for I := 0 to High(FFieldData) do
+  begin
+    BoundVal.Kind := bvkNull;
+    BoundVal.IntValue := 0;
+    BoundVal.RealValue := 0;
+    BoundVal.TextValue := '';
+    SetLength(BoundVal.BlobData, 0);
+
+    if FFieldData[I].IsAutoInc then
+      Continue;
+
+    if FEditControls[I] is TEdit then
+      Value := TEdit(FEditControls.Items[I]).Text
+    else if FEditControls[I] is TMemo then
+      Value := TMemo(FEditControls.Items[I]).Text
+    else
+      Value := '';
+
+    if IsBlobField(FFieldData[I], I) then
+    begin
+      if (FFieldData[I].DefaultVal <> '') and
+         (VarIsNull(FFieldData[I].NewValue) or VarIsEmpty(FFieldData[I].NewValue)) then
+        Continue;
+
+      if VarIsNull(FFieldData[I].NewValue) or VarIsEmpty(FFieldData[I].NewValue) then
+        BoundVal.Kind := bvkNull
+      else
+      begin
+        BoundVal.Kind := bvkBlob;
+        BoundVal.BlobData := FDB.GetBlobDataByRowId(FTableName, FRowId, FFieldData[I].ColName);
+        if (BoundVal.Kind = bvkBlob) and (Length(BoundVal.BlobData) = 0) then
+        begin
+          Value := Trim(VarToStr(FFieldData[I].NewValue));
+          if (Value <> '') and not StartsText('BLOB', Value) then
+          begin
+            BoundVal.Kind := bvkText;
+            BoundVal.TextValue := Value;
+          end;
+        end;
+      end;
+    end
+    else
+    begin
+      if (Value = '') and (FFieldData[I].DefaultVal <> '') then
+        Continue;
+
+      ColTypeU := UpperCase(FFieldData[I].ColType);
+      if IsExplicitNullText(Value) or (Value = '') then
+        BoundVal.Kind := bvkNull
+      else if Pos('INT', ColTypeU) > 0 then
+      begin
+        BoundVal.Kind := bvkInt;
+        BoundVal.IntValue := StrToInt64Def(Value, 0);
+      end
+      else if (Pos('REAL', ColTypeU) > 0) or (Pos('FLOA', ColTypeU) > 0) or
+              (Pos('DOUB', ColTypeU) > 0) or (Pos('NUMERIC', ColTypeU) > 0) or
+              (Pos('DECIMAL', ColTypeU) > 0) then
+      begin
+        BoundVal.Kind := bvkReal;
+        BoundVal.RealValue := StrToFloatDef(StringReplace(Value, ',', '.', [rfReplaceAll]), 0);
+      end
+      else
+      begin
+        BoundVal.Kind := bvkText;
+        BoundVal.TextValue := Value;
+      end;
+    end;
+
+    ColumnNames[ColCount] := FFieldData[I].ColName;
+    BoundValues[ColCount] := BoundVal;
+    Inc(ColCount);
+  end;
+
+  SetLength(ColumnNames, ColCount);
+  SetLength(BoundValues, ColCount);
+
+  InsertResult := FDB.InsertRow(FTableName, ColumnNames, BoundValues);
+  if InsertResult.Success then
+    Result := True
+  else
+    ShowMessage('Error: ' + InsertResult.ErrorMessage);
+end;
+
 procedure TfrmRowEdit.btnOKClick(Sender: TObject);
 var
   I: Integer;
@@ -815,6 +943,13 @@ var
   SQL: string;
   Value: string;
 begin
+  if FIsInsert and FIsDuplicate then
+  begin
+    if ExecuteDuplicateInsert then
+      ModalResult := mrOk;
+    Exit;
+  end;
+
   if FIsInsert then
   begin
     // Build INSERT statement
@@ -841,7 +976,7 @@ begin
         ValuesList := ValuesList + ', ';
       end;
       ColumnsList := ColumnsList + '"' + FFieldData[I].ColName + '"';
-      if Value = '' then
+      if IsExplicitNullText(Value) or (Value = '') then
         ValuesList := ValuesList + 'NULL'
       else if Pos('INT', UpperCase(FFieldData[I].ColType)) > 0 then
         ValuesList := ValuesList + Value
@@ -874,7 +1009,7 @@ begin
       if ValuesList <> '' then
         ValuesList := ValuesList + ', ';
 
-      if Value = '' then
+      if IsExplicitNullText(Value) then
         ValuesList := ValuesList + '"' + FFieldData[I].ColName + '" = NULL'
       else if Pos('INT', UpperCase(FFieldData[I].ColType)) > 0 then
         ValuesList := ValuesList + '"' + FFieldData[I].ColName + '" = ' + Value
