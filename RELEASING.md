@@ -51,9 +51,10 @@ installer\SQLiteManagerSetup-1.0.0-Win32.exe
 
 ### Проверка перед публикацией
 
-- [ ] Установка на чистой VM / другом ПК
+- [ ] Установка на **64-bit** Windows 10/11 (типичный случай)
 - [ ] Запуск exe, открытие `.db`
 - [ ] Разрядность: Win32 exe + **x86** `sqlite3.dll`
+- [ ] В `installer.iss` **нет** `ArchitecturesAllowed=x86` (IS 6.3+ блокирует 64-bit ОС)
 
 ## 4. GitHub Release
 

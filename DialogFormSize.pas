@@ -15,9 +15,12 @@ procedure SaveDialogFormSize(AForm: TForm; const AKey: string);
 
 implementation
 
+uses
+  AppPaths;
+
 function DialogIniPath: string;
 begin
-  Result := ExtractFilePath(ParamStr(0)) + 'SQLiteManager.ini';
+  Result := GetSettingsIniPath;
 end;
 
 function ClampDialogSize(AValue: Integer): Integer;

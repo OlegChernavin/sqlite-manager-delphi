@@ -4,7 +4,7 @@
         <ProjectVersion>19.2</ProjectVersion>
         <FrameworkType>VCL</FrameworkType>
         <Base>True</Base>
-        <Config Condition="'$(Config)'==''">Debug</Config>
+        <Config Condition="'$(Config)'==''">Release</Config>
         <Platform Condition="'$(Platform)'==''">Win32</Platform>
         <TargetedPlatforms>1</TargetedPlatforms>
         <AppType>Application</AppType>
@@ -102,25 +102,33 @@
             <Form>frmMain</Form>
         </DCCReference>
         <DCCReference Include="DBModule.pas"/>
+        <DCCReference Include="AppPaths.pas"/>
         <DCCReference Include="CreateTreeForm.pas">
             <Form>frmCreateTree</Form>
+        </DCCReference>
+        <DCCReference Include="CreateIndexForm.pas">
+            <Form>frmCreateIndex</Form>
+        </DCCReference>
+        <DCCReference Include="AddColumnForm.pas">
+            <Form>frmAddColumn</Form>
         </DCCReference>
         <DCCReference Include="ImportExport.pas"/>
         <DCCReference Include="OptionsForm.pas">
             <Form>frmOptions</Form>
         </DCCReference>
-        <DCCReference Include="AIOptionsForm.pas">
-            <Form>frmAIOptions</Form>
-        </DCCReference>
-        <DCCReference Include="AIService.pas"/>
-        <DCCReference Include="AIProviders.pas"/>
-        <DCCReference Include="WinInetHTTPClient.pas"/>
         <DCCReference Include="AboutForm.pas">
             <Form>frmAbout</Form>
         </DCCReference>
         <DCCReference Include="SQLDialogForm.pas">
             <Form>frmSQLDialog</Form>
         </DCCReference>
+        <DCCReference Include="RowEditForm.pas">
+            <Form>frmRowEdit</Form>
+        </DCCReference>
+        <DCCReference Include="SearchForm.pas">
+            <Form>frmSearch</Form>
+        </DCCReference>
+        <DCCReference Include="SQLFieldCompletion.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

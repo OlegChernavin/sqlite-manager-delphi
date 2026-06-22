@@ -26,8 +26,8 @@ OutputBaseFilename=SQLiteManagerSetup-{#MyAppVersion}-Win32
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
-ArchitecturesAllowed=x86
-ArchitecturesInstallIn64BitMode=
+; Не использовать ArchitecturesAllowed=x86 — в IS 6.3+ это только 32-bit ОС.
+; По умолчанию x86compatible: Win32/Win64 (WoW64) + ARM64 Win10/11.
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

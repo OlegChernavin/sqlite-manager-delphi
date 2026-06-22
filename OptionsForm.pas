@@ -53,13 +53,13 @@ implementation
 {$R *.dfm}
 
 uses
-  System.IniFiles, MainForm, AIOptionsForm;
+  System.IniFiles, MainForm, AIOptionsForm, AppPaths;
 
 procedure TfrmOptions.FormCreate(Sender: TObject);
 var
   Ini: TIniFile;
 begin
-  Ini := TIniFile.Create(ExtractFilePath(ParamStr(0)) + 'SQLiteManager.ini');
+  Ini := TIniFile.Create(GetSettingsIniPath);
   try
     // General
     chkConfirmDrop.Checked := Ini.ReadBool('Options', 'ConfirmDrop', True);
@@ -90,7 +90,7 @@ var
   Enabled: Boolean;
   ProviderName: string;
 begin
-  Ini := TIniFile.Create(ExtractFilePath(ParamStr(0)) + 'SQLiteManager.ini');
+  Ini := TIniFile.Create(GetSettingsIniPath);
   try
     Enabled := Ini.ReadBool('AI', 'Enabled', False);
     ProviderName := Ini.ReadString('AI', 'ProviderName', 'Not configured');
@@ -108,7 +108,7 @@ procedure TfrmOptions.btnOKClick(Sender: TObject);
 var
   Ini: TIniFile;
 begin
-  Ini := TIniFile.Create(ExtractFilePath(ParamStr(0)) + 'SQLiteManager.ini');
+  Ini := TIniFile.Create(GetSettingsIniPath);
   try
     // General
     Ini.WriteBool('Options', 'ConfirmDrop', chkConfirmDrop.Checked);

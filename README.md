@@ -114,6 +114,8 @@ msbuild SQLiteManager.dproj /t:Build
 
 Установщик: `installer\SQLiteManagerSetup-1.0.0-Win32.exe` — **не коммитить**, выложить в **GitHub Releases**.
 
+> **Inno Setup 6.3+:** не пишите `ArchitecturesAllowed=x86` — это только 32-bit Windows. На 64-bit Win10/11 установщик выдаст «программа не поддерживает версию Windows». Для Win32-приложения оставьте директиву по умолчанию (`x86compatible`) или уберите строку.
+
 Полная инструкция: **[RELEASING.md](RELEASING.md)** (тег `v1.0.0`, `gh release create`, чеклист).
 
 ## Возможности
@@ -151,7 +153,7 @@ msbuild SQLiteManager.dproj /t:Build
 
 ## Настройки
 
-Настройки хранятся в файле `SQLiteManager.ini`:
+Настройки хранятся в `%APPDATA%\OlegChernavin\SQLiteManager\SQLiteManager.ini` (при первом запуске копируется из папки exe, если файл там был).
 
 ```ini
 [Options]

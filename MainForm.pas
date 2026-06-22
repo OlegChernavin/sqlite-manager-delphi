@@ -446,7 +446,7 @@ implementation
 {$R *.dfm}
 uses
   Vcl.FileCtrl, Winapi.ShellAPI, Winapi.CommCtrl, OptionsForm, AboutForm, CreateTreeForm,
-  CreateIndexForm, AddColumnForm, SQLDialogForm, RowEditForm, SQLFieldCompletion;
+  CreateIndexForm, AddColumnForm, SQLDialogForm, RowEditForm, SQLFieldCompletion, AppPaths;
 
 type
   TCompactProgressHelper = class
@@ -655,8 +655,9 @@ begin
   CurrentGrid := nil;
   PopupMenuCol := 0;
   PopupMenuRow := 0;
-  // Load options
-  FOptions := TIniFile.Create(ExtractFilePath(ParamStr(0)) + 'SQLiteManager.ini');
+  // Load options (%APPDATA%\OlegChernavin\SQLiteManager\SQLiteManager.ini)
+  MigrateLegacySettingsIniIfNeeded;
+  FOptions := TIniFile.Create(GetSettingsIniPath);
   LoadOptions;
   // Load recent databases
   FRecentDatabases.StrictDelimiter := True;
