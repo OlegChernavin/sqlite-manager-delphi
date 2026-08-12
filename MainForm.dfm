@@ -600,7 +600,7 @@ object frmMain: TfrmMain
           Font.Charset = DEFAULT_CHARSET
           Font.Color = clWindowText
           Font.Height = -13
-          Font.Name = 'Cascadia Code'
+          Font.Name = 'Consolas'
           Font.Style = []
           Font.Quality = fqClearTypeNatural
           PopupMenu = pmSQL

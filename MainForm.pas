@@ -339,6 +339,7 @@ type
     FPendingExportCount: Integer;
     FPendingExportTable: string;
     FPendingExportSchema: string;
+    FWindowPosLoaded: Boolean;
     procedure SplitSQLStatements(const ASQL: string; out AStatements: TArray<string>);
     procedure LoadWindowPosition;
     procedure SaveWindowPosition;
@@ -787,7 +788,11 @@ begin
 end;
 procedure TfrmMain.FormActivate(Sender: TObject);
 begin
-  // Load window position
+  // Once only: every Activate (e.g. after completion popup Hide) re-applied
+  // registry Width/Height onto maximized window → shrink with Maximized icon.
+  if FWindowPosLoaded then
+    Exit;
+  FWindowPosLoaded := True;
   LoadWindowPosition;
 end;
 procedure TfrmMain.FormClose(Sender: TObject; var Action: TCloseAction);
@@ -3476,8 +3481,10 @@ end;
 procedure TfrmMain.ApplySQLCompletionFormSize;
 var
   LineH, TotalH: Integer;
+  Frm: TCustomForm;
 begin
-  if not SynSQLCompletion.Form.Visible then
+  Frm := SynSQLCompletion.Form;
+  if (Frm = nil) or not Frm.Visible or not Frm.HandleAllocated then
     Exit;
 
   LineH := GetSQLCompletionLineHeight;
@@ -3485,12 +3492,8 @@ begin
   TotalH := LineH * SQLCompletionVisibleLines;
   SynSQLCompletion.NbLinesInWindow := SQLCompletionVisibleLines;
 
-  with SynSQLCompletion.Form do
-  begin
-    ClientHeight := TotalH;
-    Height := TotalH;
-    Invalidate;
-  end;
+  SetWindowPos(Frm.Handle, 0, 0, 0, Frm.Width, TotalH,
+    SWP_NOMOVE or SWP_NOZORDER or SWP_NOACTIVATE);
 end;
 
 procedure TfrmMain.ScheduleSQLCompletionFixSize;
