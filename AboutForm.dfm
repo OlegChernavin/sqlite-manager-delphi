@@ -11,6 +11,7 @@ object frmAbout: TfrmAbout
   Font.Name = 'Segoe UI'
   Font.Style = []
   Position = poScreenCenter
+  OnCreate = FormCreate
   PixelsPerInch = 96
   TextHeight = 15
   object pnlHeader: TPanel
@@ -57,7 +58,7 @@ object frmAbout: TfrmAbout
       Top = 20
       Width = 350
       Height = 25
-      Caption = 'Version: 1.0.0'
+      Caption = 'Version:'
       Font.Charset = DEFAULT_CHARSET
       Font.Color = clWindowText
       Font.Height = -14
