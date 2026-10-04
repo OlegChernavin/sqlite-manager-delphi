@@ -417,6 +417,7 @@ type
     function IsGridRowSelected(AGrid: TStringGrid; ARow: Integer): Boolean;
     procedure HandleGridRowClick(AGrid: TStringGrid; ARow: Integer; Shift: TShiftState);
     procedure SyncGridSelectionRect(AGrid: TStringGrid);
+    procedure SelectGridSingleRow(AGrid: TStringGrid; ARow: Integer);
     procedure SelectGridDefaultRow(AGrid: TStringGrid);
     procedure UpdateBrowseSelectionButtons;
     procedure ApplyBrowseHorzScroll(ACol: Integer; AUpdateSaved: Boolean);
@@ -1497,7 +1498,7 @@ begin
   AGrid.Selection := Sel;
 end;
 
-procedure TfrmMain.SelectGridDefaultRow(AGrid: TStringGrid);
+procedure TfrmMain.SelectGridSingleRow(AGrid: TStringGrid; ARow: Integer);
 var
   List: TList<Integer>;
   SavedLeft: Integer;
@@ -1505,9 +1506,13 @@ begin
   ClearGridSelection(AGrid);
   if AGrid.RowCount <= AGrid.FixedRows then
     Exit;
+  if ARow < AGrid.FixedRows then
+    ARow := AGrid.FixedRows;
+  if ARow > AGrid.RowCount - 1 then
+    ARow := AGrid.RowCount - 1;
   List := GetGridSelectedRows(AGrid);
-  List.Add(AGrid.FixedRows);
-  SetGridAnchorRow(AGrid, AGrid.FixedRows);
+  List.Add(ARow);
+  SetGridAnchorRow(AGrid, ARow);
   if AGrid = sgBrowse then
     SavedLeft := FBrowseLeftCol
   else
@@ -1515,7 +1520,7 @@ begin
   if AGrid = sgBrowse then
     FBrowseLeftColUpdating := True;
   try
-    AGrid.Row := AGrid.FixedRows;
+    AGrid.Row := ARow;
     SyncGridSelectionRect(AGrid);
     if AGrid = sgBrowse then
       ApplyBrowseHorzScroll(SavedLeft, False);
@@ -1525,6 +1530,17 @@ begin
     else
       AGrid.LeftCol := AGrid.FixedCols;
   end;
+  // OnSelectCell blocks AGrid.Row, so scroll the row into view manually
+  if ARow < AGrid.TopRow then
+    AGrid.TopRow := ARow
+  else if ARow > AGrid.TopRow + AGrid.VisibleRowCount - 1 then
+    AGrid.TopRow := Max(AGrid.FixedRows, ARow - AGrid.VisibleRowCount + 1);
+  AGrid.Invalidate;
+end;
+
+procedure TfrmMain.SelectGridDefaultRow(AGrid: TStringGrid);
+begin
+  SelectGridSingleRow(AGrid, AGrid.FixedRows);
 end;
 
 procedure TfrmMain.ApplyBrowseHorzScroll(ACol: Integer; AUpdateSaved: Boolean);
@@ -3870,7 +3886,8 @@ begin
     begin
       // Refresh data
       LoadTableData;
-      sgBrowse.Row := SelectedRow;
+      SelectGridSingleRow(sgBrowse, SelectedRow);
+      UpdateBrowseSelectionButtons;
       //ShowMessage('Record updated successfully');
     end;
   finally
