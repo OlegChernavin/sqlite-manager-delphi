@@ -314,6 +314,7 @@ type
     FExecuteAnchorRow: Integer;
     FBrowseLeftCol: Integer; // saved horizontal scroll within current table
     FBrowseLeftColUpdating: Boolean;
+    FBrowseViewRestoring: Boolean; // reload keeps the current row and scroll position
     FRecentQueries: TStringList; // Last 10 SQL queries for current database
     FCurrentDatabaseName: string; // Current database filename (without path)
     TableInfo: TArray<TColumnDef>;
@@ -419,6 +420,12 @@ type
     procedure SyncGridSelectionRect(AGrid: TStringGrid);
     procedure SelectGridSingleRow(AGrid: TStringGrid; ARow: Integer);
     procedure SelectGridDefaultRow(AGrid: TStringGrid);
+    function BrowseCurrentRow: Integer;
+    function GridMaxTopRow(AGrid: TStringGrid): Integer;
+    procedure RestoreBrowseView(ARow, ATopRow: Integer);
+    procedure ReloadBrowseData(ATargetRow: Integer = -1; AKeepScroll: Boolean = True);
+    function BrowseRowIndexOfRowId(ARowId: Int64): Integer;
+    procedure BrowseShowRowId(ARowId: Int64);
     procedure UpdateBrowseSelectionButtons;
     procedure ApplyBrowseHorzScroll(ACol: Integer; AUpdateSaved: Boolean);
     procedure ResetBrowseHorzScroll;
@@ -1530,17 +1537,139 @@ begin
     else
       AGrid.LeftCol := AGrid.FixedCols;
   end;
-  // OnSelectCell blocks AGrid.Row, so scroll the row into view manually
-  if ARow < AGrid.TopRow then
-    AGrid.TopRow := ARow
-  else if ARow > AGrid.TopRow + AGrid.VisibleRowCount - 1 then
-    AGrid.TopRow := Max(AGrid.FixedRows, ARow - AGrid.VisibleRowCount + 1);
+  // OnSelectCell blocks AGrid.Row, so scroll the row into view manually.
+  // While restoring a view the caller reapplies the saved scroll position instead.
+  if not (FBrowseViewRestoring and (AGrid = sgBrowse)) then
+  begin
+    if ARow < AGrid.TopRow then
+      AGrid.TopRow := ARow
+    else if ARow > AGrid.TopRow + AGrid.VisibleRowCount - 1 then
+      AGrid.TopRow := Max(AGrid.FixedRows, ARow - AGrid.VisibleRowCount + 1);
+  end;
   AGrid.Invalidate;
 end;
 
 procedure TfrmMain.SelectGridDefaultRow(AGrid: TStringGrid);
 begin
   SelectGridSingleRow(AGrid, AGrid.FixedRows);
+end;
+
+function TfrmMain.BrowseCurrentRow: Integer;
+begin
+  if FBrowseSelectedRows.Count > 0 then
+    Result := FBrowseSelectedRows.Last
+  else
+    Result := sgBrowse.Row;
+end;
+
+// Last TopRow that still fills the grid with data rows
+function TfrmMain.GridMaxTopRow(AGrid: TStringGrid): Integer;
+begin
+  Result := Max(AGrid.FixedRows, AGrid.RowCount - AGrid.VisibleRowCount);
+end;
+
+procedure TfrmMain.RestoreBrowseView(ARow, ATopRow: Integer);
+var
+  MaxTopRow: Integer;
+begin
+  if sgBrowse.RowCount <= sgBrowse.FixedRows then
+    Exit;
+  SelectGridSingleRow(sgBrowse, ARow);
+  // Reapply the scroll position last: the reload and the highlight both move it
+  MaxTopRow := GridMaxTopRow(sgBrowse);
+  if ATopRow < sgBrowse.FixedRows then
+    ATopRow := sgBrowse.FixedRows
+  else if ATopRow > MaxTopRow then
+    ATopRow := MaxTopRow;
+  FBrowseLeftColUpdating := True;
+  try
+    sgBrowse.TopRow := ATopRow;
+  finally
+    FBrowseLeftColUpdating := False;
+  end;
+  UpdateBrowseSelectionButtons;
+end;
+
+// Reloads the browse grid, selecting ATargetRow (the current row when negative).
+// With AKeepScroll the list stays where it is, otherwise the row is scrolled into view.
+procedure TfrmMain.ReloadBrowseData(ATargetRow: Integer = -1; AKeepScroll: Boolean = True);
+var
+  SavedRow, SavedTopRow: Integer;
+  Locked: Boolean;
+begin
+  if ATargetRow >= sgBrowse.FixedRows then
+    SavedRow := ATargetRow
+  else
+    SavedRow := BrowseCurrentRow;
+  SavedTopRow := sgBrowse.TopRow;
+  // Hide the intermediate states of the reload (data refill, default row selection)
+  Locked := sgBrowse.HandleAllocated;
+  if Locked then
+    SendMessage(sgBrowse.Handle, WM_SETREDRAW, 0, 0);
+  FBrowseViewRestoring := AKeepScroll;
+  try
+    LoadTableData;
+    if AKeepScroll then
+      RestoreBrowseView(SavedRow, SavedTopRow)
+    else
+    begin
+      SelectGridSingleRow(sgBrowse, SavedRow);
+      UpdateBrowseSelectionButtons;
+    end;
+  finally
+    FBrowseViewRestoring := False;
+    if Locked then
+    begin
+      SendMessage(sgBrowse.Handle, WM_SETREDRAW, 1, 0);
+      RedrawWindow(sgBrowse.Handle, nil, 0,
+        RDW_INVALIDATE or RDW_ERASE or RDW_FRAME or RDW_NOCHILDREN);
+    end;
+  end;
+end;
+
+// Position of ARowId within the whole ordered (and filtered) result set, 0-based
+function TfrmMain.BrowseRowIndexOfRowId(ARowId: Int64): Integer;
+var
+  SQL, WhereClause: string;
+  QueryResult: TQueryResult;
+begin
+  Result := -1;
+  if (ARowId = 0) or (FCurrentTable = '') or not FDB.IsOpen then
+    Exit;
+  if FIsSearching then
+    WhereClause := ' WHERE ' + FSearchWhereClause
+  else
+    WhereClause := '';
+  SQL := Format('SELECT __rn - 1 FROM (SELECT rowid AS __rid, ' +
+    'ROW_NUMBER() OVER (%s) AS __rn FROM %s%s) WHERE __rid = %d',
+    [Trim(BrowseOrderByClause), BrowseTableSqlRef, WhereClause, ARowId]);
+  QueryResult := FDB.ExecuteSQL(SQL);
+  if QueryResult.Success and (QueryResult.RowCount > 0) then
+    Result := StrToIntDef(VarToStr(QueryResult.Rows[0][0]), -1);
+end;
+
+// Reloads the browse grid with ARowId selected, paging to it if needed
+procedure TfrmMain.BrowseShowRowId(ARowId: Int64);
+var
+  RowIndex, Limit, Offset: Integer;
+begin
+  RowIndex := BrowseRowIndexOfRowId(ARowId);
+  if RowIndex < 0 then
+  begin
+    // Window functions unavailable, no rowid (view) or row already gone
+    ReloadBrowseData;
+    Exit;
+  end;
+  Limit := StrToIntDef(edtLimit.Text, 100);
+  if Limit < 1 then
+    Limit := 100;
+  Offset := StrToIntDef(edtOffset.Text, 0);
+  if (RowIndex < Offset) or (RowIndex >= Offset + Limit) then
+  begin
+    Offset := (RowIndex div Limit) * Limit;
+    edtOffset.Text := IntToStr(Offset);
+  end;
+  ReloadBrowseData(RowIndex - Offset + sgBrowse.FixedRows, False);
 end;
 
 procedure TfrmMain.ApplyBrowseHorzScroll(ACol: Integer; AUpdateSaved: Boolean);
@@ -3863,7 +3992,7 @@ begin
     ShowMessage('Please select a table or view first');
     Exit;
   end;
-  SelectedRow := sgBrowse.Row;
+  SelectedRow := BrowseCurrentRow;
   if SelectedRow < 1 then
   begin
     ShowMessage('Please select a row to edit');
@@ -3884,10 +4013,8 @@ begin
   try
     if Frm.ShowModal = mrOk then
     begin
-      // Refresh data
-      LoadTableData;
-      SelectGridSingleRow(sgBrowse, SelectedRow);
-      UpdateBrowseSelectionButtons;
+      // Refresh data, keeping the edited row selected and the list in place
+      ReloadBrowseData;
       //ShowMessage('Record updated successfully');
     end;
   finally
@@ -3925,6 +4052,7 @@ procedure TfrmMain.btnDeleteRecordClick(Sender: TObject);
 var
   I: Integer;
   Confirm: Integer;
+  FirstDeletedRow: Integer;
   RowIds: TStringList;
   SQL: string;
   QueryResult: TQueryResult;
@@ -3944,6 +4072,7 @@ begin
     ShowMessage('Please select at least one row to delete');
     Exit;
   end;
+  FirstDeletedRow := FBrowseSelectedRows.First;
   RowIds := TStringList.Create;
   try
     for I := 0 to FBrowseSelectedRows.Count - 1 do
@@ -3974,9 +4103,9 @@ begin
           FDB.ExecuteSQL(SQL);
         end;
         FDB.CommitTransaction;
-        
-        // Refresh data
-        LoadTableData;
+
+        // Refresh data, selecting whatever row took the place of the first deleted one
+        ReloadBrowseData(FirstDeletedRow);
         //ShowMessage(IntToStr(RowIds.Count) + ' record(s) deleted successfully');
       except
         FDB.RollbackTransaction;
@@ -4009,8 +4138,8 @@ begin
   try
     if Frm.ShowModal = mrOk then
     begin
-      // Refresh data
-      LoadTableData;
+      // Refresh data and jump to the new record
+      BrowseShowRowId(Frm.InsertedRowId);
       //ShowMessage('Record added successfully');
     end;
   finally
@@ -4037,7 +4166,7 @@ begin
     ShowMessage('Please select a table or view first');
     Exit;
   end;
-  SelectedRow := sgBrowse.Row;
+  SelectedRow := BrowseCurrentRow;
   if SelectedRow < 1 then
   begin
     ShowMessage('Please select a row to duplicate');
@@ -4053,7 +4182,8 @@ begin
   Frm := TfrmRowEdit.CreateEdit(Self, FDB, BrowseTableSqlRef, Columns, RowId, True, True);
   try
     if Frm.ShowModal = mrOk then
-      LoadTableData;
+      // Refresh data and jump to the copy
+      BrowseShowRowId(Frm.InsertedRowId);
   finally
     Frm.Free;
   end;
@@ -4859,14 +4989,18 @@ end;
 procedure TfrmMain.sgBrowseMouseWheelDown(Sender: TObject; Shift: TShiftState; MousePos: TPoint; var Handled: Boolean);
 var
   G: TStringGrid;
-  SavedLeft: Integer;
+  SavedLeft, MaxTopRow: Integer;
 begin
   Handled := True;
   G := Sender as TStringGrid;
   SavedLeft := FBrowseLeftCol;
   FBrowseLeftColUpdating := True;
   try
-    G.TopRow := G.TopRow + 3;
+    MaxTopRow := GridMaxTopRow(G);
+    if G.TopRow + 3 > MaxTopRow then
+      G.TopRow := MaxTopRow
+    else
+      G.TopRow := G.TopRow + 3;
     ApplyBrowseHorzScroll(SavedLeft, False);
   finally
     FBrowseLeftColUpdating := False;

@@ -38,6 +38,7 @@ type
     FIsInsert: Boolean;
     FIsDuplicate: Boolean;
     FRowId: string;
+    FInsertedRowId: Int64; // rowid of the row created by an insert or duplicate
     FEditControls: TObjectList<TWinControl>;
     FFieldLabels: TArray<TLabel>;
     function FormSizeKey: string;
@@ -75,6 +76,7 @@ type
       const ATableName: string; const AColumns: TArray<TColumnDef>;
       const ARowId: string; AIsInsert: Boolean; AIsDuplicate: Boolean = False);
     destructor Destroy; override;
+    property InsertedRowId: Int64 read FInsertedRowId;
   end;
 implementation
 
@@ -931,7 +933,10 @@ begin
 
   InsertResult := FDB.InsertRow(FTableName, ColumnNames, BoundValues);
   if InsertResult.Success then
-    Result := True
+  begin
+    FInsertedRowId := FDB.LastInsertRowID;
+    Result := True;
+  end
   else
     ShowMessage('Error: ' + InsertResult.ErrorMessage);
 end;
@@ -1032,6 +1037,8 @@ begin
   
   if Result.Success then
   begin
+    if FIsInsert then
+      FInsertedRowId := FDB.LastInsertRowID;
     ModalResult := mrOk;
   end
   else

@@ -130,6 +130,7 @@ type
     function ExecuteSQL(const ASQL: string): TQueryResult;
     function InsertRow(const ATableName: string; const AColumnNames: TArray<string>;
       const AValues: TArray<TBoundColumnValue>): TQueryResult;
+    function LastInsertRowID: Int64;
     function ExecuteScalar(const ASQL: string): Variant;
     function GetTableData(const ATableName: string; ALimit: Integer = 100; AOffset: Integer = 0): TQueryResult;
     function GetBlobData(const ATableName: string; ARow: Integer; ACol: Integer): TBytes;
@@ -830,6 +831,14 @@ begin
   finally
     sqlite3_finalize(Stmt);
   end;
+end;
+
+function TSQLiteHandler.LastInsertRowID: Int64;
+begin
+  if FIsOpen then
+    Result := sqlite3_last_insert_rowid(FDB)
+  else
+    Result := 0;
 end;
 
 function TSQLiteHandler.ExecuteScalar(const ASQL: string): Variant;
